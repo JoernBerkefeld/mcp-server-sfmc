@@ -1,0 +1,8 @@
+{
+    "yaml.schemas": {
+      "https://raw.githubusercontent.com/microsoft/azure-pipelines-vscode/main/service-schema.json": [
+        "azure-pipelines*.yml",
+        "ci-templates/azure-pipelines.yml"
+      ]
+    }
+  }
