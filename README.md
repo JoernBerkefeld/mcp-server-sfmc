@@ -4,6 +4,16 @@ MCP server providing Salesforce Marketing Cloud language intelligence — AMPscr
 
 Built on [sfmc-language-lsp](https://github.com/JoernBerkefeld/sfmc-language-lsp), the same engine that powers the [SFMC Language Service VS Code extension](https://marketplace.visualstudio.com/items?itemName=joernberkefeld.sfmc-language).
 
+## VS Code MCP Server Gallery (`@mcp`)
+
+This package is registered with the [official MCP Registry](https://registry.modelcontextprotocol.io) as **`io.github.JoernBerkefeld/mcp-server-sfmc`** so it can appear in Visual Studio Code when you use the **`@mcp`** filter in the Extensions view (see the [publish quickstart](https://github.com/modelcontextprotocol/registry/blob/main/docs/modelcontextprotocol-io/quickstart.mdx)). Enable **`chat.mcp.gallery.enabled`** if the gallery does not show.
+
+The registry only stores **metadata**; the server still runs **locally** via stdio (for example `npx -y mcp-server-sfmc@latest`). This is separate from **`@contribute:mcp`**, which lists VS Code extensions that contribute MCP definitions — use the [SFMC Language Service](https://marketplace.visualstudio.com/items?itemName=joernberkefeld.sfmc-language) for that path.
+
+After publishing metadata (see [Publish an MCP Server](https://github.com/modelcontextprotocol/registry/blob/main/docs/modelcontextprotocol-io/quickstart.mdx) or the release workflow), you can confirm the entry with:
+
+`curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.JoernBerkefeld/mcp-server-sfmc"`
+
 ## VS Code without manual MCP config
 
 If you use the **SFMC Language Service** extension (**1.101+**), it registers this MCP server for discovery in VS Code — you normally do **not** need to edit `.vscode/mcp.json` or run `npm install` for that path; VS Code still launches the published package via `npx` when the server starts.
