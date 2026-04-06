@@ -269,4 +269,12 @@ describe('MCP Registry manifest', () => {
         assert.equal(server.packages[0].registryType, 'npm');
         assert.equal(server.packages[0].transport.type, 'stdio');
     });
+
+    test('registry description length within MCP Registry limit (100 chars)', () => {
+        const server = readRepoJson('server.json');
+        assert.ok(
+            server.description.length <= 100,
+            `server.json description is ${server.description.length} chars (max 100)`,
+        );
+    });
 });
