@@ -6,9 +6,19 @@
  * paths that the MCP tool handlers call.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { sfmcLanguageService, validateAmpscript, validateSsjs, validateGtlBlocks } from 'sfmc-language-lsp';
+
+const testsDir = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(testsDir, '..');
+
+function readRepoJson(name) {
+    return JSON.parse(readFileSync(join(repoRoot, name), 'utf8'));
+}
 
 // ---------------------------------------------------------------------------
 // validate_ampscript tool logic
@@ -234,5 +244,29 @@ describe('format_sfmc_code tool logic', () => {
             'Platform.Load("$1", "$2")',
         );
         assert.equal(formatted, 'Platform.Load("core", "1.1.5");');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// MCP Registry manifest (package.json / server.json)
+// ---------------------------------------------------------------------------
+
+describe('MCP Registry manifest', () => {
+    test('mcpName matches server.json name', () => {
+        const pkg = readRepoJson('package.json');
+        const server = readRepoJson('server.json');
+        assert.equal(pkg.mcpName, server.name);
+        assert.equal(pkg.mcpName, 'io.github.JoernBerkefeld/mcp-server-sfmc');
+    });
+
+    test('versions and npm package row match package.json', () => {
+        const pkg = readRepoJson('package.json');
+        const server = readRepoJson('server.json');
+        assert.equal(server.version, pkg.version);
+        assert.equal(server.packages.length, 1);
+        assert.equal(server.packages[0].version, pkg.version);
+        assert.equal(server.packages[0].identifier, pkg.name);
+        assert.equal(server.packages[0].registryType, 'npm');
+        assert.equal(server.packages[0].transport.type, 'stdio');
     });
 });

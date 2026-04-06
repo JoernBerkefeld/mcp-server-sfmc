@@ -1,5 +1,6 @@
-# This workflow will run tests using node and then publish a package to GitHub Packages when a release is created
-# For more information see: https://help.github.com/actions/language-and-framework-guides/publishing-nodejs-packages
+# On release: npm publish, then MCP Registry metadata via mcp-publisher (GitHub OIDC — no MCP-specific secrets).
+# npm: https://docs.npmjs.com/cli/v8/commands/npm-publish
+# MCP Registry + OIDC: https://github.com/modelcontextprotocol/registry/blob/main/docs/modelcontextprotocol-io/github-actions.mdx
 
 name: Publish NPM on Release
 
@@ -35,6 +36,31 @@ jobs:
                   registry-url: https://registry.npmjs.org/
             - run: npm ci
             - run: npm publish
+
+            # Uses workflow permissions.id-token (github-oidc). If this fails with an auth error, compare
+            # repository/org Actions settings with https://github.com/modelcontextprotocol/registry/blob/main/docs/modelcontextprotocol-io/github-actions.mdx
+            - name: Install mcp-publisher
+              run: |
+                  set -euo pipefail
+                  curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+                  chmod +x mcp-publisher
+
+            - name: Sync server.json versions from package.json
+              run: |
+                  node <<'NODE'
+                  const fs = require('fs');
+                  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+                  const server = JSON.parse(fs.readFileSync('server.json', 'utf8'));
+                  server.version = pkg.version;
+                  server.packages[0].version = pkg.version;
+                  fs.writeFileSync('server.json', JSON.stringify(server, null, 2) + '\n');
+                  NODE
+
+            - name: Authenticate to MCP Registry (GitHub OIDC)
+              run: ./mcp-publisher login github-oidc
+
+            - name: Publish MCP Registry metadata
+              run: ./mcp-publisher publish
 
             - name: Close release milestone if empty
               env:
