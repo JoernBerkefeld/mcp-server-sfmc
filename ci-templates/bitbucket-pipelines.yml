@@ -1,0 +1,42 @@
+# Bitbucket Pipelines — SFMC Code Quality
+# Runs eslint-plugin-sfmc on changed AMPscript and SSJS files in pull requests.
+#
+# Add to your repository as bitbucket-pipelines.yml (or merge into your existing one).
+
+image: node:20-alpine
+
+definitions:
+  steps:
+    - step: &sfmc-lint
+        name: Lint AMPscript & SSJS
+        script:
+          - npm install --no-save eslint eslint-plugin-sfmc
+          - |
+            cat > eslint.config.mjs << 'EOF'
+            import sfmc from 'eslint-plugin-sfmc';
+            export default [...sfmc.configs.recommended];
+            EOF
+          - |
+            # Bitbucket provides BITBUCKET_PR_DESTINATION_BRANCH for PR builds
+            if [ -n "$BITBUCKET_PR_DESTINATION_BRANCH" ]; then
+              git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH" --depth=1
+              CHANGED=$(git diff --name-only "origin/$BITBUCKET_PR_DESTINATION_BRANCH"...HEAD \
+                | grep -E '\.(amp|ampscript|ssjs|html)$' || true)
+            else
+              # Fallback: lint all SFMC files
+              CHANGED=$(find . -type f \( -name '*.amp' -o -name '*.ampscript' -o -name '*.ssjs' \) | head -50)
+            fi
+
+            if [ -z "$CHANGED" ]; then
+              echo "No SFMC files to lint."
+              exit 0
+            fi
+
+            echo "Linting:"
+            echo "$CHANGED"
+            npx eslint --format stylish $CHANGED
+
+pipelines:
+  pull-requests:
+    "**":
+      - step: *sfmc-lint

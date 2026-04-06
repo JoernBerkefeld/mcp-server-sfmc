@@ -1,0 +1,54 @@
+# Azure DevOps Pipelines — SFMC Code Quality
+# Runs eslint-plugin-sfmc on changed AMPscript and SSJS files in pull requests.
+#
+# Add to your repository as azure-pipelines.yml and enable in Azure DevOps Pipelines.
+
+trigger: none   # only run on PRs, not pushes
+
+pr:
+  branches:
+    include:
+      - main
+      - master
+      - develop
+  paths:
+    include:
+      - "**/*.amp"
+      - "**/*.ampscript"
+      - "**/*.ssjs"
+      - "**/*.html"
+
+pool:
+  vmImage: "ubuntu-latest"
+
+steps:
+  - task: NodeTool@0
+    inputs:
+      versionSpec: "20.x"
+    displayName: "Install Node.js 20"
+
+  - script: npm install --no-save eslint eslint-plugin-sfmc
+    displayName: "Install eslint-plugin-sfmc"
+
+  - script: |
+      cat > eslint.config.mjs << 'EOF'
+      import sfmc from 'eslint-plugin-sfmc';
+      export default [...sfmc.configs.recommended];
+      EOF
+    displayName: "Create ESLint config"
+
+  - script: |
+      git fetch origin $(System.PullRequest.TargetBranch) --depth=1
+      CHANGED=$(git diff --name-only origin/$(System.PullRequest.TargetBranch)...HEAD \
+        | grep -E '\.(amp|ampscript|ssjs|html)$' || true)
+
+      if [ -z "$CHANGED" ]; then
+        echo "No SFMC files changed — skipping lint."
+        exit 0
+      fi
+
+      echo "Linting SFMC files:"
+      echo "$CHANGED"
+      npx eslint --format stylish $CHANGED
+    displayName: "Run SFMC lint"
+    failOnStderr: false
