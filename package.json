@@ -1,8 +1,8 @@
 {
     "name": "mcp-server-sfmc",
-    "version": "0.1.7",
+    "version": "0.1.8",
     "mcpName": "io.github.JoernBerkefeld/mcp-server-sfmc",
-    "description": "SFMC AMPscript, SSJS, GTL: validation, lookup, review, and prompts via MCP.",
+    "description": "SFMC AMPscript/SSJS/GTL tools and searchable Marketing Cloud Engagement help (MCE vs Next scoped) via MCP.",
     "author": "Jörn Berkefeld",
     "license": "MIT",
     "repository": {
@@ -35,14 +35,17 @@
     },
     "files": [
         "dist",
+        "bundled",
         "README.md",
         "LICENSE"
     ],
     "scripts": {
         "prepublishOnly": "npm run build",
+        "bundle-mce-help": "node scripts/bundle-mce-help.mjs",
         "build": "tsc -p tsconfig.json",
         "dev": "tsc -p tsconfig.json --watch",
         "start": "node dist/index.js",
+        "pretest": "npm run build",
         "test": "node --test tests/*.test.mjs",
         "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\""
     },

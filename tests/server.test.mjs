@@ -12,6 +12,11 @@ import { fileURLToPath } from 'node:url';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { sfmcLanguageService, validateAmpscript, validateSsjs, validateGtlBlocks } from 'sfmc-language-lsp';
+import {
+    clearMceHelpCache,
+    getMceHelpStats,
+    searchMceHelp,
+} from '../dist/mce-help-search.js';
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(testsDir, '..');
@@ -244,6 +249,44 @@ describe('format_sfmc_code tool logic', () => {
             'Platform.Load("$1", "$2")',
         );
         assert.equal(formatted, 'Platform.Load("core", "1.1.5");');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// search_mce_help (bundled Marketing Cloud Engagement help)
+// ---------------------------------------------------------------------------
+
+describe('search_mce_help index', () => {
+    test('bundled chunks exist and are split by product scope', () => {
+        clearMceHelpCache();
+        const stats = getMceHelpStats();
+        assert.ok(stats.chunkCount > 0, 'Expected bundled/mce-help/chunks.json with at least one chunk');
+        assert.ok(stats.engagementChunks > 0, 'Expected Marketing Cloud Engagement sections');
+        assert.ok(stats.nextChunks > 0, 'Expected Marketing Cloud Next (Next for Engagement) sections');
+    });
+
+    test('finds setup-related content for a typical admin query', () => {
+        clearMceHelpCache();
+        const hits = searchMceHelp('business unit', 5, 'engagement');
+        assert.ok(hits.length > 0, 'Expected hits for "business unit" in Engagement scope');
+        for (const h of hits) {
+            assert.equal(h.chunk.productScope, 'marketing_cloud_engagement');
+        }
+    });
+
+    test('product_focus next only returns Next-scoped chunks', () => {
+        clearMceHelpCache();
+        const hits = searchMceHelp('marketing', 8, 'next');
+        assert.ok(hits.length > 0, 'Expected some Next-folder hits');
+        for (const h of hits) {
+            assert.equal(h.chunk.productScope, 'marketing_cloud_next');
+        }
+    });
+
+    test('empty query yields no hits', () => {
+        clearMceHelpCache();
+        const hits = searchMceHelp('   ', 5, 'any');
+        assert.equal(hits.length, 0);
     });
 });
 
