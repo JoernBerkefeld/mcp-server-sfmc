@@ -1,8 +1,8 @@
 {
     "name": "mcp-server-sfmc",
-    "version": "0.1.6",
+    "version": "0.1.7",
     "mcpName": "io.github.JoernBerkefeld/mcp-server-sfmc",
-    "description": "MCP server for Salesforce Marketing Cloud — exposes SFMC language intelligence (AMPscript, SSJS, GTL) as Model Context Protocol tools, resources, and prompts for AI-assisted development and code review.",
+    "description": "SFMC AMPscript, SSJS, GTL: validation, lookup, review, and prompts via MCP.",
     "author": "Jörn Berkefeld",
     "license": "MIT",
     "repository": {
