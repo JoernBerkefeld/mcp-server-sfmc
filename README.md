@@ -1,6 +1,6 @@
 # mcp-server-sfmc
 
-MCP server providing Salesforce Marketing Cloud language intelligence — AMPscript, SSJS, and GTL — as Model Context Protocol tools, resources, and prompts for AI-assisted development and code review.
+MCP server providing Salesforce Marketing Cloud language intelligence — AMPscript, SSJS, and GTL — as Model Context Protocol tools, resources, and prompts for AI-assisted development and code review. It also ships a **searchable index** of mirrored Salesforce Help for **Marketing Cloud Engagement** administration and setup (business units, Journey Builder, Automation Studio, tenants, and similar topics), with explicit scoping vs **Marketing Cloud Next** (a separate product).
 
 Built on [sfmc-language-lsp](https://github.com/JoernBerkefeld/sfmc-language-lsp), the same engine that powers the [SFMC Language Service VS Code extension](https://marketplace.visualstudio.com/items?itemName=joernberkefeld.sfmc-language).
 
@@ -43,6 +43,7 @@ None of these replace the VS Code extension for **editing** (syntax, LSP, snippe
 | **Completions** | AMPscript function/keyword completions, SSJS Platform API catalog |
 | **Prompts** | Guided prompts for writing AMPscript, SSJS, reviewing code, and converting between the two |
 | **Resources** | Full function catalogs, keyword list, unsupported ES6+ syntax list |
+| **MCE help search** | Bundled excerpts from local Help mirrors (`docs/help.salesforce/mce`) with Engagement vs Next labeling |
 
 ## Quick start
 
@@ -140,6 +141,7 @@ Then replace `"command": "npx", "args": ["-y", "mcp-server-sfmc@latest"]` with:
 | `get_ampscript_completions` | List valid completions at a given cursor position in AMPscript |
 | `get_ssjs_completions` | List SSJS Platform API completions, optionally filtered by prefix |
 | `format_sfmc_code` | Apply basic formatting conventions (keyword casing, quote normalisation) |
+| `search_mce_help` | Search bundled Marketing Cloud setup/ops help; use `product_focus` to target **Engagement** vs **Next** |
 
 ## Resources
 
@@ -149,6 +151,8 @@ Then replace `"command": "npx", "args": ["-y", "mcp-server-sfmc@latest"]` with:
 | `sfmc://ssjs/functions` | Full SSJS function catalog |
 | `sfmc://ampscript/keywords` | All AMPscript keywords |
 | `sfmc://ssjs/unsupported-syntax` | ES6+ features not supported in SFMC SSJS |
+| `sfmc://mce/product-context` | How **Marketing Cloud Engagement** differs from **Marketing Cloud Next** (when to use which) |
+| `sfmc://mce/help-index` | List of bundled help files and section counts per product scope |
 
 ## Prompts
 
@@ -160,6 +164,20 @@ Access via `/mcp.sfmc.writeAmpscript` etc. in VS Code, or via the prompts API:
 | `writeSsjs` | Generate SSJS code for a described task |
 | `reviewSfmcCode` | Review AMPscript or SSJS code for bugs and best-practice violations |
 | `convertAmpscriptToSsjs` | Convert AMPscript code to equivalent SSJS |
+| `answerMceHowTo` | Guided prompt for admin/setup questions — searches bundled help and keeps Engagement vs Next explicit |
+
+## Refresh bundled Marketing Cloud Engagement help
+
+The published npm package includes `bundled/mce-help/chunks.json`, built from a checkout that contains the mirrored Help tree at `docs/help.salesforce/mce` (for example in this monorepo). To regenerate after updating those docs:
+
+```bash
+cd mcp-server-sfmc
+npm run bundle-mce-help
+npm run build
+npm test
+```
+
+Override the source path: `MCE_HELP_DOCS=/absolute/path/to/mce npm run bundle-mce-help`
 
 ## AI code review in pull requests
 

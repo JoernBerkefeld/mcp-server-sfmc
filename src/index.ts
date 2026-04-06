@@ -8,6 +8,9 @@
  * to enable accurate SFMC code generation and review.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -18,6 +21,20 @@ import {
     validateGtlBlocks,
     type SfmcSettings,
 } from 'sfmc-language-lsp';
+import {
+    getChunks,
+    getMceHelpStats,
+    searchMceHelp,
+    type MceProductFocus,
+} from './mce-help-search.js';
+
+function projectPackageRoot(): string {
+    return path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+}
+
+const pkg = JSON.parse(fs.readFileSync(path.join(projectPackageRoot(), 'package.json'), 'utf8')) as {
+    version: string;
+};
 
 // ---------------------------------------------------------------------------
 // Server instance
@@ -25,7 +42,7 @@ import {
 
 const server = new McpServer({
     name: 'mcp-server-sfmc',
-    version: '0.1.0',
+    version: pkg.version,
 });
 
 // ---------------------------------------------------------------------------
@@ -438,6 +455,56 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Tool: search_mce_help
+// ---------------------------------------------------------------------------
+
+const MCE_HELP_TOOL_DESC =
+    'Search bundled Salesforce Help excerpts for Marketing Cloud **operational** tasks (setup, business units, ' +
+    'Journey Builder, Automation Studio, campaigns, tenants, etc.). Uses a local mirror of help under ' +
+    '`docs/help.salesforce/mce`. Results are tagged as **Marketing Cloud Engagement** vs **Marketing Cloud Next** ' +
+    '(a separate product Salesforce positions as a future path; do not conflate with classic Engagement unless the doc says so). ' +
+    'Prefer `product_focus: engagement` for classic MCE questions; use `next` when the user explicitly asks about Next or migration.';
+
+server.tool(
+    'search_mce_help',
+    MCE_HELP_TOOL_DESC,
+    {
+        query: z.string().describe('Keywords or question text (e.g. "enable business unit", "new child account").'),
+        limit: z.number().int().min(1).max(25).optional().describe('Max results (default 10).'),
+        product_focus: z.enum(['any', 'engagement', 'next']).optional()
+            .describe(
+                'Limit to Marketing Cloud Engagement docs (`engagement`), Marketing Cloud Next-only sections (`next`), ' +
+                'or search everything (`any`, default).',
+            ),
+    },
+    ({ query, limit = 10, product_focus = 'any' }) => {
+        const focus = product_focus as MceProductFocus;
+        const hits = searchMceHelp(query, limit, focus);
+        if (hits.length === 0) {
+            const stats = getMceHelpStats();
+            const hint =
+                stats.chunkCount === 0
+                    ? 'Bundled help index missing. Run `npm run bundle-mce-help` from the package folder with ' +
+                      '`docs/help.salesforce/mce` present, or set `MCE_HELP_DOCS` to that tree.'
+                    : `No matches for this query with product_focus="${focus}". Try broader keywords or product_focus="any".`;
+            return { content: [{ type: 'text', text: hint }] };
+        }
+        const lines = hits.map((h, i) => {
+            const excerpt = h.chunk.body.replace(/\s+/g, ' ').slice(0, 520);
+            return (
+                `### ${i + 1}. ${h.chunk.relativePath} — ${h.chunk.heading}\n` +
+                `**Product:** ${h.chunk.productLabel}\n` +
+                `**Score:** ${h.score}\n\n` +
+                `${excerpt}${h.chunk.body.length > 520 ? '…' : ''}\n`
+            );
+        });
+        return {
+            content: [{ type: 'text', text: lines.join('\n---\n\n') }],
+        };
+    },
+);
+
+// ---------------------------------------------------------------------------
 // Resource: ampscript-function-catalog
 // ---------------------------------------------------------------------------
 
@@ -522,6 +589,66 @@ server.resource(
                 mimeType: 'text/markdown',
                 text: `# SSJS Unsupported Syntax\n\nThese ES6+ features are not supported in Salesforce Marketing Cloud SSJS:\n\n${lines.join('\n')}`,
             }],
+        };
+    },
+);
+
+// ---------------------------------------------------------------------------
+// Resource: mce-product-context (Engagement vs Next)
+// ---------------------------------------------------------------------------
+
+const MCE_VS_NEXT_MD = `# Marketing Cloud Engagement vs Marketing Cloud Next
+
+Use this when interpreting **search_mce_help** results or user questions about Salesforce Marketing Cloud products.
+
+## Marketing Cloud Engagement (MCE)
+
+This is the established Marketing Cloud application area many teams mean when they say "Marketing Cloud": Email Studio, Journey Builder, Automation Studio, Content Builder, Mobile Studio, and related setup and administration. **Bundled help excerpts** tagged as Marketing Cloud Engagement come from the mirrored Help tree **outside** the folder named **Marketing Cloud Next for Engagement**.
+
+For "how do I…", "where do I enable…", or "set up a business unit" **without** an explicit Next migration ask, start with the \`search_mce_help\` tool using **product_focus \`engagement\`** so answers stay on classic Engagement workflows.
+
+## Marketing Cloud Next
+
+**Marketing Cloud Next** is a **different product** Salesforce often positions as a long-term direction and upsell. It is **not** a drop-in rename of Engagement: feature coverage and UI paths differ, and Next is still evolving relative to many Engagement capabilities.
+
+Help chunks tagged as **Marketing Cloud Next** are sourced from the **Marketing Cloud Next for Engagement** section of the same mirror. Use those when the user asks about Next, migration, or that section explicitly. Use **product_focus \`next\`** or \`any\` for those topics.
+
+## Practical rule
+
+- Default operational questions → **Engagement** (\`product_focus: engagement\`).
+- User names Next, migration to Next, or "Next for Engagement" → include **Next** (\`next\` or \`any\`) and **state in the answer** which product the steps apply to.
+`;
+
+server.resource(
+    'mce-product-context',
+    'sfmc://mce/product-context',
+    async () => ({
+        contents: [{
+            uri: 'sfmc://mce/product-context',
+            mimeType: 'text/markdown',
+            text: MCE_VS_NEXT_MD,
+        }],
+    }),
+);
+
+// ---------------------------------------------------------------------------
+// Resource: mce-help index (bundled files)
+// ---------------------------------------------------------------------------
+
+server.resource(
+    'mce-help-index',
+    'sfmc://mce/help-index',
+    async () => {
+        const chunks = getChunks();
+        const files = [...new Set(chunks.map((c) => c.relativePath))].sort();
+        const stats = getMceHelpStats();
+        const text =
+            `# Bundled Marketing Cloud help (${stats.chunkCount} sections from ${files.length} files)\n\n` +
+            `| Scope | Sections |\n| --- | ---: |\n| Marketing Cloud Engagement | ${stats.engagementChunks} |\n| Marketing Cloud Next (Next for Engagement folder) | ${stats.nextChunks} |\n\n` +
+            `## Files\n\n` +
+            files.map((f) => `- ${f}`).join('\n');
+        return {
+            contents: [{ uri: 'sfmc://mce/help-index', mimeType: 'text/markdown', text }],
         };
     },
 );
@@ -692,6 +819,52 @@ server.prompt(
             },
         }],
     }),
+);
+
+// ---------------------------------------------------------------------------
+// Prompt: answerMceHowTo
+// ---------------------------------------------------------------------------
+
+server.prompt(
+    'answerMceHowTo',
+    'Answer a Marketing Cloud **administration or setup** question using the bundled Engagement help search. ' +
+    'Distinguishes Marketing Cloud Engagement from Marketing Cloud Next.',
+    {
+        question: z.string().describe('User question, e.g. how to enable a feature or set up a business unit.'),
+        assumeProduct: z.enum(['engagement', 'next', 'unsure']).optional()
+            .describe('Whether the user means classic Engagement, Marketing Cloud Next, or unknown (default: engagement).'),
+    },
+    ({ question, assumeProduct = 'engagement' }) => {
+        const focusLine =
+            assumeProduct === 'next'
+                ? 'Use MCP tool `search_mce_help` with product_focus `next` or `any`, and the `mce-product-context` resource.'
+                : assumeProduct === 'unsure'
+                    ? 'Use `search_mce_help` with product_focus `any`; if results mix products, separate Engagement vs Next steps clearly.'
+                    : 'Use `search_mce_help` with product_focus `engagement` first; only use `next` if the question is explicitly about Marketing Cloud Next.';
+        return {
+            messages: [{
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: [
+                        'You are a Salesforce Marketing Cloud specialist helping with **setup and operations** (not AMPscript/SSJS code unless asked).',
+                        '',
+                        '## Product scope',
+                        '- **Marketing Cloud Engagement** = classic Email Studio, Journey Builder, Automation Studio, tenant/BU admin, etc.',
+                        '- **Marketing Cloud Next** = a **different** Salesforce product; do not assume the same UI or steps as Engagement.',
+                        '',
+                        '## What to do',
+                        '1. Read resource `sfmc://mce/product-context` if you need a refresher on Engagement vs Next.',
+                        `2. ${focusLine}`,
+                        '3. Cite which product your steps apply to. If the bundled excerpts are incomplete, say what is missing and suggest verifying in the live org or current Salesforce Help.',
+                        '',
+                        '## Question',
+                        question,
+                    ].join('\n'),
+                },
+            }],
+        };
+    },
 );
 
 // ---------------------------------------------------------------------------

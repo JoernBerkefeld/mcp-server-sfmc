@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.JoernBerkefeld/mcp-server-sfmc",
-  "description": "SFMC AMPscript, SSJS, GTL: validation, lookup, review, and prompts via MCP.",
+  "description": "SFMC AMPscript/SSJS/GTL tools and searchable Marketing Cloud Engagement help (MCE vs Next) via MCP.",
   "repository": {
     "url": "https://github.com/JoernBerkefeld/mcp-server-sfmc",
     "source": "github"
   },
-  "version": "0.1.7",
+  "version": "0.1.8",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "mcp-server-sfmc",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "transport": {
         "type": "stdio"
       }
