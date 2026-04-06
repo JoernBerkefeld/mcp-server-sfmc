@@ -4,6 +4,24 @@ MCP server providing Salesforce Marketing Cloud language intelligence — AMPscr
 
 Built on [sfmc-language-lsp](https://github.com/JoernBerkefeld/sfmc-language-lsp), the same engine that powers the [SFMC Language Service VS Code extension](https://marketplace.visualstudio.com/items?itemName=joernberkefeld.sfmc-language).
 
+## VS Code without manual MCP config
+
+If you use the **SFMC Language Service** extension (**1.101+**), it registers this MCP server for discovery in VS Code — you normally do **not** need to edit `.vscode/mcp.json` or run `npm install` for that path; VS Code still launches the published package via `npx` when the server starts.
+
+For **other editors**, or if you prefer explicit configuration, use the `npx` or install options below.
+
+## Using this package without the VS Code extension
+
+You **do not** have to install the VS Code extension. Pick one way to run the server:
+
+| Approach | When to use it |
+|---|---|
+| **`npx` (no install)** | Default in the examples below. Runs the latest published version from npm on demand; first run may download the package. **Requires Node.js and npm** (which provides `npx`). |
+| **`npm install -g mcp-server-sfmc`** | Same CLI as `npx`, but the package stays on disk so **startup is faster** and you can set `"command": "mcp-server-sfmc"` with empty `args` in your MCP config. |
+| **`npm install mcp-server-sfmc` in a project** | Keeps a **pinned version** in that folder’s `node_modules` — point your MCP config at `npx mcp-server-sfmc` with `cwd` set to the project, or run `./node_modules/.bin/mcp-server-sfmc` directly. |
+
+None of these replace the VS Code extension for **editing** (syntax, LSP, snippets); they only expose the **MCP server** to tools that speak the Model Context Protocol.
+
 ## What it gives your AI assistant
 
 | Feature | Details |
@@ -18,9 +36,9 @@ Built on [sfmc-language-lsp](https://github.com/JoernBerkefeld/sfmc-language-lsp
 
 ## Quick start
 
-### VS Code (1.99+) + GitHub Copilot
+### VS Code (1.99+) + GitHub Copilot — manual `mcp.json`
 
-Add a `.vscode/mcp.json` file to your project (or copy it from this repo):
+If you are **not** using the SFMC Language Service extension’s built-in MCP registration, add a `.vscode/mcp.json` file to your project (or copy it from this repo):
 
 ```json
 {
