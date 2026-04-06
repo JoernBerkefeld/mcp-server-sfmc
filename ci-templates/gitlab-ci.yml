@@ -1,0 +1,41 @@
+# GitLab CI — SFMC Code Quality
+#
+# Runs eslint-plugin-sfmc on every merge request that touches AMPscript or SSJS files.
+# Add this to your .gitlab-ci.yml or include it via:
+#
+#   include:
+#     - remote: 'https://raw.githubusercontent.com/JoernBerkefeld/mcp-server-sfmc/main/ci-templates/gitlab-ci.yml'
+
+stages:
+  - lint
+
+sfmc-lint:
+  stage: lint
+  image: node:20-alpine
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "**/*.amp"
+        - "**/*.ampscript"
+        - "**/*.ssjs"
+        - "**/*.html"
+  script:
+    - npm install --no-save eslint eslint-plugin-sfmc
+    - |
+      cat > eslint.config.mjs << 'EOF'
+      import sfmc from 'eslint-plugin-sfmc';
+      export default [...sfmc.configs.recommended];
+      EOF
+    - |
+      CHANGED=$(git diff --name-only origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD \
+        | grep -E '\.(amp|ampscript|ssjs|html)$' || true)
+      if [ -z "$CHANGED" ]; then
+        echo "No SFMC files changed — skipping lint."
+        exit 0
+      fi
+      npx eslint --format stylish $CHANGED
+  allow_failure: false
+  artifacts:
+    when: on_failure
+    reports:
+      junit: eslint-report.xml

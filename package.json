@@ -1,0 +1,54 @@
+{
+    "name": "mcp-server-sfmc",
+    "version": "0.1.0",
+    "description": "MCP server for Salesforce Marketing Cloud — exposes SFMC language intelligence (AMPscript, SSJS, GTL) as Model Context Protocol tools, resources, and prompts for AI-assisted development and code review.",
+    "author": "Jörn Berkefeld",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/JoernBerkefeld/mcp-server-sfmc.git"
+    },
+    "bugs": {
+        "url": "https://github.com/JoernBerkefeld/mcp-server-sfmc/issues"
+    },
+    "homepage": "https://github.com/JoernBerkefeld/mcp-server-sfmc#readme",
+    "keywords": [
+        "mcp",
+        "model-context-protocol",
+        "ampscript",
+        "ssjs",
+        "sfmc",
+        "salesforce",
+        "marketing-cloud",
+        "ai",
+        "copilot",
+        "code-review"
+    ],
+    "type": "module",
+    "bin": {
+        "mcp-server-sfmc": "./dist/index.js"
+    },
+    "main": "./dist/index.js",
+    "exports": {
+        ".": "./dist/index.js"
+    },
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "dev": "tsc -p tsconfig.json --watch",
+        "start": "node dist/index.js",
+        "test": "node --test tests/*.test.mjs",
+        "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\""
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.29.0",
+        "sfmc-language-lsp": "file:../sfmc-language-lsp"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
+}

@@ -1,0 +1,58 @@
+// Jenkins pipeline — SFMC Code Quality
+// Runs eslint-plugin-sfmc on changed AMPscript and SSJS files in a pull request.
+//
+// Prerequisites:
+//   - Node.js 20+ installed on the agent (or use the 'nodejs' tool in Jenkins config)
+//   - "GitHub Pull Request Builder" or "Bitbucket Branch Source" plugin for PR detection
+
+pipeline {
+    agent any
+
+    tools {
+        nodejs 'node-20'   // matches the name in Manage Jenkins > Global Tool Configuration
+    }
+
+    triggers {
+        // GitHub Pull Request Builder plugin trigger (adjust as needed for your SCM)
+        githubPush()
+    }
+
+    stages {
+        stage('Lint SFMC') {
+            when {
+                changeRequest()   // only run on PRs/MRs
+            }
+            steps {
+                script {
+                    // Install linter
+                    sh 'npm install --no-save eslint eslint-plugin-sfmc'
+
+                    // Write minimal config
+                    writeFile file: 'eslint.config.mjs', text: '''
+import sfmc from 'eslint-plugin-sfmc';
+export default [...sfmc.configs.recommended];
+'''
+
+                    // Determine changed files (adjust base-branch detection as needed)
+                    def changedFiles = sh(
+                        script: "git diff --name-only origin/${env.CHANGE_TARGET}...HEAD | grep -E '\\.(amp|ampscript|ssjs|html)$' || true",
+                        returnStdout: true
+                    ).trim()
+
+                    if (changedFiles) {
+                        echo "Linting SFMC files:\n${changedFiles}"
+                        sh "npx eslint --format stylish ${changedFiles}"
+                    } else {
+                        echo "No SFMC files changed — skipping lint."
+                    }
+                }
+            }
+            post {
+                failure {
+                    // Optionally post a comment using the GitHub plugin
+                    echo 'SFMC lint failed. See build log for details.'
+                }
+            }
+        }
+    }
+}
