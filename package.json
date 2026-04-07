@@ -1,6 +1,6 @@
 {
     "name": "mcp-server-sfmc",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "mcpName": "io.github.JoernBerkefeld/mcp-server-sfmc",
     "description": "SFMC AMPscript/SSJS/GTL tools and searchable Marketing Cloud Engagement help (MCE vs Next scoped) via MCP.",
     "author": "Jörn Berkefeld",
