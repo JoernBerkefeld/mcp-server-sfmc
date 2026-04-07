@@ -1,12 +1,19 @@
 /**
- * Full-text search over bundled Marketing Cloud Engagement help excerpts
- * (mirrored Salesforce Help Markdown under docs/help.salesforce/mce).
+ * Full-text search over bundled Marketing Cloud help excerpts
+ * (mirrored Salesforce Help Markdown under docs/help.salesforce/marketing).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export type MceProductScope = 'marketing_cloud_engagement' | 'marketing_cloud_next';
+export type MceProductScope =
+    | 'marketing_cloud_engagement'
+    | 'marketing_cloud_next'
+    | 'marketing_cloud_personalization'
+    | 'marketing_cloud_account_engagement'
+    | 'marketing_cloud_intelligence'
+    | 'loyalty_management'
+    | 'salesforce_personalization';
 
 export interface MceHelpChunk {
     id: string;
@@ -58,7 +65,24 @@ export interface MceSearchHit {
     chunk: MceHelpChunk;
 }
 
-export type MceProductFocus = 'any' | 'engagement' | 'next';
+export type MceProductFocus =
+    | 'any'
+    | 'engagement'
+    | 'next'
+    | 'personalization'
+    | 'account-engagement'
+    | 'intelligence'
+    | 'loyalty';
+
+const FOCUS_TO_SCOPES: Record<MceProductFocus, MceProductScope[]> = {
+    any: [],
+    engagement: ['marketing_cloud_engagement'],
+    next: ['marketing_cloud_next'],
+    personalization: ['marketing_cloud_personalization', 'salesforce_personalization'],
+    'account-engagement': ['marketing_cloud_account_engagement'],
+    intelligence: ['marketing_cloud_intelligence'],
+    loyalty: ['loyalty_management'],
+};
 
 function tokenize(q: string): string[] {
     return q
@@ -69,8 +93,8 @@ function tokenize(q: string): string[] {
 
 function matchesFocus(chunk: MceHelpChunk, focus: MceProductFocus): boolean {
     if (focus === 'any') return true;
-    if (focus === 'engagement') return chunk.productScope === 'marketing_cloud_engagement';
-    return chunk.productScope === 'marketing_cloud_next';
+    const allowed = FOCUS_TO_SCOPES[focus];
+    return allowed.includes(chunk.productScope);
 }
 
 /**
@@ -100,13 +124,20 @@ export function searchMceHelp(query: string, limit: number, productFocus: McePro
     return hits.slice(0, Math.max(1, limit));
 }
 
-export function getMceHelpStats(): { chunkCount: number; engagementChunks: number; nextChunks: number } {
+export function getMceHelpStats(): {
+    chunkCount: number;
+    engagementChunks: number;
+    nextChunks: number;
+    breakdown: Partial<Record<MceProductScope, number>>;
+} {
     const chunks = getChunks();
     let engagementChunks = 0;
     let nextChunks = 0;
+    const breakdown: Partial<Record<MceProductScope, number>> = {};
     for (const c of chunks) {
+        breakdown[c.productScope] = (breakdown[c.productScope] ?? 0) + 1;
         if (c.productScope === 'marketing_cloud_next') nextChunks++;
-        else engagementChunks++;
+        else if (c.productScope === 'marketing_cloud_engagement') engagementChunks++;
     }
-    return { chunkCount: chunks.length, engagementChunks, nextChunks };
+    return { chunkCount: chunks.length, engagementChunks, nextChunks, breakdown };
 }

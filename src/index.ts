@@ -41,18 +41,27 @@ const pkg = JSON.parse(fs.readFileSync(path.join(projectPackageRoot(), 'package.
 // ---------------------------------------------------------------------------
 
 const SERVER_INSTRUCTIONS =
-    'This server provides authoritative SFMC language intelligence and bundled Marketing Cloud Engagement help.\n\n' +
+    'This server provides authoritative SFMC language intelligence and bundled Salesforce Marketing Cloud product help.\n\n' +
     '## When to call search_mce_help\n\n' +
-    '**ALWAYS** call `search_mce_help` (with `product_focus: engagement` unless the user explicitly asks about ' +
-    'Marketing Cloud Next) before answering any question about:\n' +
-    '- Marketing Cloud setup, configuration, or administration\n' +
-    '- Business units, tenant types, account hierarchy\n' +
-    '- Journey Builder, Automation Studio, campaigns\n' +
-    '- Mobile Studio (MobileConnect, MobilePush, GroupConnect)\n' +
-    '- Subscriptions, sending limits, suspended accounts\n' +
-    '- Marketing Cloud Next or migration to Next\n\n' +
-    'Do **not** answer these from general training data — use `search_mce_help` first, cite the product scope ' +
-    '(Engagement vs Next), and note when excerpts are incomplete.\n\n' +
+    '**ALWAYS** call `search_mce_help` before answering any question about the following product areas ' +
+    '(use the matching `product_focus` value for best results):\n\n' +
+    '| Topic | product_focus |\n' +
+    '|---|---|\n' +
+    '| Marketing Cloud Engagement — setup, configuration, business units, tenant types, account hierarchy | `engagement` |\n' +
+    '| Journey Builder, Automation Studio, campaigns, behavioral triggers | `engagement` |\n' +
+    '| Email Studio, Content Builder, CloudPages | `engagement` |\n' +
+    '| Mobile Studio (MobileConnect, MobilePush, GroupConnect) | `engagement` |\n' +
+    '| Subscriptions, sending limits, suspended accounts, Einstein features | `engagement` |\n' +
+    '| Advertising, Distributed Marketing, Marketing Cloud Connect | `engagement` |\n' +
+    '| Contact Builder, Audience Builder, Data Extensions | `engagement` |\n' +
+    '| Marketing Cloud Next, migration to Next | `next` |\n' +
+    '| Marketing Cloud Personalization / Interaction Studio, real-time personalisation, A/B testing | `personalization` |\n' +
+    '| Salesforce Personalization | `personalization` |\n' +
+    '| Marketing Cloud Account Engagement / Pardot, B2B marketing automation, lead scoring | `account-engagement` |\n' +
+    '| Marketing Cloud Intelligence / Datorama, cross-channel analytics, data pipelines | `intelligence` |\n' +
+    '| Loyalty Management, loyalty programs, referral marketing, member engagement, vouchers | `loyalty` |\n\n' +
+    'Do **not** answer these from general training data — call `search_mce_help` first, cite the product scope ' +
+    'in the answer, and note when excerpts are incomplete.\n\n' +
     '## When to call language tools\n\n' +
     'For AMPscript/SSJS/GTL code tasks use `validate_*`, `lookup_*`, `review_change`, `suggest_fix`, etc. ' +
     'Do **not** guess function signatures — call `lookup_ampscript_function` or `lookup_ssjs_function`.';
@@ -476,12 +485,16 @@ server.tool(
 // ---------------------------------------------------------------------------
 
 const MCE_HELP_TOOL_DESC =
-    '**Prefer this over training data** for any Marketing Cloud operational or administrative question. ' +
-    'Searches bundled Salesforce Help excerpts for MCE **setup and administration** — business units, tenant types, ' +
-    'Journey Builder, Automation Studio, campaigns, Mobile Studio, subscriptions, suspended accounts, and similar topics. ' +
-    'Results are tagged as **Marketing Cloud Engagement** (classic Email Studio / Journey Builder / Automation Studio) ' +
-    'vs **Marketing Cloud Next** (a separate product; do not conflate with classic Engagement). ' +
-    'Use `product_focus: engagement` for classic MCE questions; use `next` when the user explicitly asks about Next or migration.';
+    '**Prefer this over training data** for any Salesforce Marketing Cloud operational or administrative question. ' +
+    'Searches bundled Salesforce Help excerpts across **7 product areas**:\n' +
+    '- **Marketing Cloud Engagement** (`engagement`) — Email Studio, Journey Builder, Automation Studio, Content Builder, Mobile Studio, business units, campaigns, subscriptions\n' +
+    '- **Marketing Cloud Next** (`next`) — next-gen platform, migration path from Engagement\n' +
+    '- **Marketing Cloud Personalization / Interaction Studio** (`personalization`) — real-time personalisation, A/B testing, behavioral targeting\n' +
+    '- **Salesforce Personalization** (`personalization`) — next-generation personalisation engine\n' +
+    '- **Marketing Cloud Account Engagement / Pardot** (`account-engagement`) — B2B marketing automation, lead scoring, forms, Salesforce CRM sync\n' +
+    '- **Marketing Cloud Intelligence / Datorama** (`intelligence`) — cross-channel analytics, data pipelines, KPI reporting\n' +
+    '- **Loyalty Management** (`loyalty`) — loyalty programs, referral marketing, member engagement, vouchers, promotions\n\n' +
+    'Use `product_focus` to restrict results to a single product area. Default `any` searches all products.';
 
 server.tool(
     'search_mce_help',
@@ -489,10 +502,12 @@ server.tool(
     {
         query: z.string().describe('Keywords or question text (e.g. "enable business unit", "new child account").'),
         limit: z.number().int().min(1).max(25).optional().describe('Max results (default 10).'),
-        product_focus: z.enum(['any', 'engagement', 'next']).optional()
+        product_focus: z.enum(['any', 'engagement', 'next', 'personalization', 'account-engagement', 'intelligence', 'loyalty']).optional()
             .describe(
-                'Limit to Marketing Cloud Engagement docs (`engagement`), Marketing Cloud Next-only sections (`next`), ' +
-                'or search everything (`any`, default).',
+                'Restrict results to a product area: `engagement` (MCE — Email Studio, Journey Builder, etc.), ' +
+                '`next` (Marketing Cloud Next), `personalization` (MC Personalization / Interaction Studio / Salesforce Personalization), ' +
+                '`account-engagement` (Pardot / MC Account Engagement), `intelligence` (Datorama / MC Intelligence), ' +
+                '`loyalty` (Loyalty Management), or `any` to search all products (default).',
             ),
     },
     ({ query, limit = 10, product_focus = 'any' }) => {
@@ -615,26 +630,43 @@ server.resource(
 // Resource: mce-product-context (Engagement vs Next)
 // ---------------------------------------------------------------------------
 
-const MCE_VS_NEXT_MD = `# Marketing Cloud Engagement vs Marketing Cloud Next
+const MCE_VS_NEXT_MD = `# Salesforce Marketing Cloud Product Guide
 
-Use this when interpreting **search_mce_help** results or user questions about Salesforce Marketing Cloud products.
+Use this when interpreting **search_mce_help** results or answering user questions about Salesforce Marketing Cloud products.
 
-## Marketing Cloud Engagement (MCE)
+## Marketing Cloud Engagement (MCE) — \`product_focus: engagement\`
 
-This is the established Marketing Cloud application area many teams mean when they say "Marketing Cloud": Email Studio, Journey Builder, Automation Studio, Content Builder, Mobile Studio, and related setup and administration. **Bundled help excerpts** tagged as Marketing Cloud Engagement come from the mirrored Help tree **outside** the folder named **Marketing Cloud Next for Engagement**.
+The established Marketing Cloud platform many teams mean when they say "Marketing Cloud": Email Studio, Journey Builder, Automation Studio, Content Builder, Mobile Studio, business-unit administration, subscription management, and related setup. When a user asks a generic MCE operational question without naming a specific product, default to \`product_focus: engagement\`.
 
-For "how do I…", "where do I enable…", or "set up a business unit" **without** an explicit Next migration ask, start with the \`search_mce_help\` tool using **product_focus \`engagement\`** so answers stay on classic Engagement workflows.
+## Marketing Cloud Next — \`product_focus: next\`
 
-## Marketing Cloud Next
+A **separate product** Salesforce positions as the long-term direction and migration path from Engagement. Feature coverage and UI paths differ from classic Engagement. Use \`next\` or \`any\` only when the user explicitly asks about Next or migration to Next.
 
-**Marketing Cloud Next** is a **different product** Salesforce often positions as a long-term direction and upsell. It is **not** a drop-in rename of Engagement: feature coverage and UI paths differ, and Next is still evolving relative to many Engagement capabilities.
+## Marketing Cloud Personalization / Interaction Studio — \`product_focus: personalization\`
 
-Help chunks tagged as **Marketing Cloud Next** are sourced from the **Marketing Cloud Next for Engagement** section of the same mirror. Use those when the user asks about Next, migration, or that section explicitly. Use **product_focus \`next\`** or \`any\` for those topics.
+Real-time personalisation engine for web, email, and app experiences. Formerly branded as Interaction Studio. Includes A/B testing, behavioral triggers, and Einstein personalisation. Also covers the newer **Salesforce Personalization** product (successor branding). Use \`product_focus: personalization\` for both.
 
-## Practical rule
+## Marketing Cloud Account Engagement (Pardot) — \`product_focus: account-engagement\`
 
-- Default operational questions → **Engagement** (\`product_focus: engagement\`).
-- User names Next, migration to Next, or "Next for Engagement" → include **Next** (\`next\` or \`any\`) and **state in the answer** which product the steps apply to.
+B2B marketing automation platform tightly integrated with Salesforce CRM. Covers lead scoring, nurture journeys, forms, landing pages, Engagement Studio, and reporting. Formerly known as Pardot.
+
+## Marketing Cloud Intelligence (Datorama) — \`product_focus: intelligence\`
+
+Cross-channel marketing analytics and data pipeline platform. Covers KPI reporting, data connectors, ingestion pipelines (MDP), dashboards, and marketplace apps. Formerly branded as Datorama.
+
+## Loyalty Management — \`product_focus: loyalty\`
+
+Salesforce Loyalty Management covers loyalty program setup, tiers, points, vouchers, promotions, referral marketing (including B2B referral), member engagement widgets, and data privacy for loyalty data.
+
+## Practical rules
+
+- Generic operational question with no product named → **Engagement** (\`product_focus: engagement\`).
+- Question about personalisation, Interaction Studio, or visitor tracking → **personalization**.
+- Question about Pardot, lead scoring, or B2B automation → **account-engagement**.
+- Question about reporting dashboards, Datorama, or data pipelines → **intelligence**.
+- Question about loyalty programs, vouchers, referrals, or member engagement → **loyalty**.
+- Question mentions Next, migration to Next, or "Next for Engagement" → **next**.
+- Unsure which product → use \`product_focus: any\` and disambiguate from the \`productLabel\` in each result.
 `;
 
 server.resource(
@@ -660,9 +692,13 @@ server.resource(
         const chunks = getChunks();
         const files = [...new Set(chunks.map((c) => c.relativePath))].sort();
         const stats = getMceHelpStats();
+        const scopeRows = Object.entries(stats.breakdown)
+            .sort(([, a], [, b]) => b - a)
+            .map(([scope, count]) => `| ${scope} | ${count} |`)
+            .join('\n');
         const text =
             `# Bundled Marketing Cloud help (${stats.chunkCount} sections from ${files.length} files)\n\n` +
-            `| Scope | Sections |\n| --- | ---: |\n| Marketing Cloud Engagement | ${stats.engagementChunks} |\n| Marketing Cloud Next (Next for Engagement folder) | ${stats.nextChunks} |\n\n` +
+            `| Product scope | Sections |\n| --- | ---: |\n${scopeRows}\n\n` +
             `## Files\n\n` +
             files.map((f) => `- ${f}`).join('\n');
         return {
@@ -845,20 +881,24 @@ server.prompt(
 
 server.prompt(
     'answerMceHowTo',
-    'Answer a Marketing Cloud **administration or setup** question using the bundled Engagement help search. ' +
-    'Distinguishes Marketing Cloud Engagement from Marketing Cloud Next.',
+    'Answer a Marketing Cloud **administration or setup** question using the bundled help search. ' +
+    'Covers Marketing Cloud Engagement, Next, Personalization, Account Engagement (Pardot), Intelligence (Datorama), and Loyalty Management.',
     {
         question: z.string().describe('User question, e.g. how to enable a feature or set up a business unit.'),
-        assumeProduct: z.enum(['engagement', 'next', 'unsure']).optional()
-            .describe('Whether the user means classic Engagement, Marketing Cloud Next, or unknown (default: engagement).'),
+        assumeProduct: z.enum(['engagement', 'next', 'personalization', 'account-engagement', 'intelligence', 'loyalty', 'unsure']).optional()
+            .describe('Which product area the question is about (default: engagement).'),
     },
     ({ question, assumeProduct = 'engagement' }) => {
-        const focusLine =
-            assumeProduct === 'next'
-                ? 'Use MCP tool `search_mce_help` with product_focus `next` or `any`, and the `mce-product-context` resource.'
-                : assumeProduct === 'unsure'
-                    ? 'Use `search_mce_help` with product_focus `any`; if results mix products, separate Engagement vs Next steps clearly.'
-                    : 'Use `search_mce_help` with product_focus `engagement` first; only use `next` if the question is explicitly about Marketing Cloud Next.';
+        const focusMap: Record<string, string> = {
+            next: 'Use `search_mce_help` with product_focus `next` or `any`, and the `mce-product-context` resource.',
+            personalization: 'Use `search_mce_help` with product_focus `personalization`. This covers both Marketing Cloud Personalization (Interaction Studio) and Salesforce Personalization.',
+            'account-engagement': 'Use `search_mce_help` with product_focus `account-engagement` (covers Pardot / Marketing Cloud Account Engagement).',
+            intelligence: 'Use `search_mce_help` with product_focus `intelligence` (covers Datorama / Marketing Cloud Intelligence and Data Pipelines).',
+            loyalty: 'Use `search_mce_help` with product_focus `loyalty` (covers Loyalty Management and Referral Marketing).',
+            unsure: 'Use `search_mce_help` with product_focus `any`. Read the `productLabel` on each result to identify which product area each excerpt comes from.',
+        };
+        const focusLine = focusMap[assumeProduct] ??
+            'Use `search_mce_help` with product_focus `engagement` first; only switch to another focus if the question explicitly targets a different product.';
         return {
             messages: [{
                 role: 'user',
@@ -867,14 +907,18 @@ server.prompt(
                     text: [
                         'You are a Salesforce Marketing Cloud specialist helping with **setup and operations** (not AMPscript/SSJS code unless asked).',
                         '',
-                        '## Product scope',
-                        '- **Marketing Cloud Engagement** = classic Email Studio, Journey Builder, Automation Studio, tenant/BU admin, etc.',
-                        '- **Marketing Cloud Next** = a **different** Salesforce product; do not assume the same UI or steps as Engagement.',
+                        '## Product areas covered',
+                        '- **Marketing Cloud Engagement** = classic Email Studio, Journey Builder, Automation Studio, Content Builder, Mobile Studio, tenant/BU admin',
+                        '- **Marketing Cloud Next** = a **different** Salesforce product; do not assume the same UI or steps as Engagement',
+                        '- **Marketing Cloud Personalization / Interaction Studio** = real-time personalisation, A/B testing, behavioral targeting',
+                        '- **Marketing Cloud Account Engagement (Pardot)** = B2B marketing automation, lead scoring, Salesforce CRM sync',
+                        '- **Marketing Cloud Intelligence (Datorama)** = cross-channel analytics, data pipelines, KPI reporting',
+                        '- **Loyalty Management** = loyalty programs, referral marketing, vouchers, member engagement',
                         '',
                         '## What to do',
-                        '1. Read resource `sfmc://mce/product-context` if you need a refresher on Engagement vs Next.',
+                        '1. Read resource `sfmc://mce/product-context` if you need a refresher on product differences.',
                         `2. ${focusLine}`,
-                        '3. Cite which product your steps apply to. If the bundled excerpts are incomplete, say what is missing and suggest verifying in the live org or current Salesforce Help.',
+                        '3. Always state which product your answer applies to. If excerpts are incomplete, say so and recommend verifying in the live org or current Salesforce Help.',
                         '',
                         '## Question',
                         question,

@@ -1,9 +1,9 @@
 /**
  * Builds a searchable JSON index from local Salesforce Help mirrors under
- * docs/help.salesforce/mce (Marketing Cloud Engagement operational docs).
+ * docs/help.salesforce/marketing (all Marketing Cloud product docs).
  *
  * Usage: node scripts/bundle-mce-help.mjs
- * Override source: MCE_HELP_DOCS=/path/to/mce
+ * Override source: MCE_HELP_DOCS=/path/to/marketing
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,33 +17,74 @@ const OUT_FILE = path.join(OUT_DIR, 'chunks.json');
 
 const SOURCE_CANDIDATES = [
     process.env.MCE_HELP_DOCS,
+    path.join(packageRoot, '..', 'docs', 'help.salesforce', 'marketing'),
     path.join(packageRoot, '..', 'docs', 'help.salesforce', 'mce'),
 ].filter(Boolean);
 
 const MAX_BODY = 12000;
 
-/** @typedef {'marketing_cloud_engagement' | 'marketing_cloud_next'} ProductScope */
+/**
+ * @typedef {'marketing_cloud_engagement'
+ *   | 'marketing_cloud_next'
+ *   | 'marketing_cloud_personalization'
+ *   | 'marketing_cloud_account_engagement'
+ *   | 'marketing_cloud_intelligence'
+ *   | 'loyalty_management'
+ *   | 'salesforce_personalization'} ProductScope
+ */
+
+/** Maps top-level folder names to product scope tokens. */
+const FOLDER_TO_SCOPE = {
+    'marketing-cloud-engagement': 'marketing_cloud_engagement',
+    'marketing-cloud-next': 'marketing_cloud_next',
+    'marketing-cloud-personalization': 'marketing_cloud_personalization',
+    'marketing-cloud-account-engagement': 'marketing_cloud_account_engagement',
+    'marketing-cloud-intelligence': 'marketing_cloud_intelligence',
+    'loyalty-management': 'loyalty_management',
+    'salesforce-personalization': 'salesforce_personalization',
+};
 
 /**
- * @param {string} relPath posix-style relative path from mce root
+ * @param {string} relPath posix-style relative path from source root
  * @returns {ProductScope}
  */
 function inferProductScope(relPath) {
     const p = relPath.replace(/\\/g, '/').toLowerCase();
+    const topFolder = p.split('/')[0];
+    if (FOLDER_TO_SCOPE[topFolder]) {
+        return FOLDER_TO_SCOPE[topFolder];
+    }
+    // Legacy mce tree: detect Next by subfolder name
     if (p.includes('/02-marketing-cloud-next-for-engagement/')) {
         return 'marketing_cloud_next';
     }
     return 'marketing_cloud_engagement';
 }
 
+/** @type {Record<ProductScope, string>} */
+const PRODUCT_LABELS = {
+    marketing_cloud_engagement:
+        'Marketing Cloud Engagement (MCE; Email Studio, Journey Builder, Automation Studio, Content Builder, Mobile Studio)',
+    marketing_cloud_next:
+        'Marketing Cloud Next (distinct product; Salesforce migration/upsell path from Engagement)',
+    marketing_cloud_personalization:
+        'Marketing Cloud Personalization (formerly Interaction Studio; real-time personalisation and A/B testing)',
+    marketing_cloud_account_engagement:
+        'Marketing Cloud Account Engagement (formerly Pardot; B2B marketing automation)',
+    marketing_cloud_intelligence:
+        'Marketing Cloud Intelligence (formerly Datorama; cross-channel analytics and data pipelines)',
+    loyalty_management:
+        'Loyalty Management (Salesforce Loyalty Management; loyalty programs, referral marketing, member engagement)',
+    salesforce_personalization:
+        'Salesforce Personalization (next-generation real-time personalisation engine, successor to MC Personalization)',
+};
+
 /**
  * @param {ProductScope} scope
  * @returns {string}
  */
 function humanProductLabel(scope) {
-    return scope === 'marketing_cloud_next'
-        ? 'Marketing Cloud Next (distinct product; Salesforce migration/upsell path from Engagement)'
-        : 'Marketing Cloud Engagement (MCE; Email Studio, Journey Builder, Automation Studio, etc.)';
+    return PRODUCT_LABELS[scope] ?? scope;
 }
 
 /**

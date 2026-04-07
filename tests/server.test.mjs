@@ -262,7 +262,15 @@ describe('search_mce_help index', () => {
         const stats = getMceHelpStats();
         assert.ok(stats.chunkCount > 0, 'Expected bundled/mce-help/chunks.json with at least one chunk');
         assert.ok(stats.engagementChunks > 0, 'Expected Marketing Cloud Engagement sections');
-        assert.ok(stats.nextChunks > 0, 'Expected Marketing Cloud Next (Next for Engagement) sections');
+        assert.ok(stats.nextChunks > 0, 'Expected Marketing Cloud Next sections');
+        // Verify breakdown covers all 7 product areas
+        const scopes = Object.keys(stats.breakdown);
+        assert.ok(scopes.includes('marketing_cloud_engagement'), 'breakdown missing marketing_cloud_engagement');
+        assert.ok(scopes.includes('marketing_cloud_next'), 'breakdown missing marketing_cloud_next');
+        assert.ok(scopes.includes('loyalty_management'), 'breakdown missing loyalty_management');
+        assert.ok(scopes.includes('marketing_cloud_personalization'), 'breakdown missing marketing_cloud_personalization');
+        assert.ok(scopes.includes('marketing_cloud_account_engagement'), 'breakdown missing marketing_cloud_account_engagement');
+        assert.ok(scopes.includes('marketing_cloud_intelligence'), 'breakdown missing marketing_cloud_intelligence');
     });
 
     test('finds setup-related content for a typical admin query', () => {
@@ -280,6 +288,46 @@ describe('search_mce_help index', () => {
         assert.ok(hits.length > 0, 'Expected some Next-folder hits');
         for (const h of hits) {
             assert.equal(h.chunk.productScope, 'marketing_cloud_next');
+        }
+    });
+
+    test('product_focus loyalty only returns loyalty_management chunks', () => {
+        clearMceHelpCache();
+        const hits = searchMceHelp('loyalty program', 8, 'loyalty');
+        assert.ok(hits.length > 0, 'Expected hits for "loyalty program" in loyalty scope');
+        for (const h of hits) {
+            assert.equal(h.chunk.productScope, 'loyalty_management');
+        }
+    });
+
+    test('product_focus personalization only returns personalization chunks', () => {
+        clearMceHelpCache();
+        const hits = searchMceHelp('personalization', 8, 'personalization');
+        assert.ok(hits.length > 0, 'Expected hits for "personalization" scope');
+        for (const h of hits) {
+            assert.ok(
+                h.chunk.productScope === 'marketing_cloud_personalization' ||
+                h.chunk.productScope === 'salesforce_personalization',
+                `Unexpected scope: ${h.chunk.productScope}`,
+            );
+        }
+    });
+
+    test('product_focus account-engagement only returns account-engagement chunks', () => {
+        clearMceHelpCache();
+        const hits = searchMceHelp('account engagement', 5, 'account-engagement');
+        assert.ok(hits.length > 0, 'Expected hits for account-engagement scope');
+        for (const h of hits) {
+            assert.equal(h.chunk.productScope, 'marketing_cloud_account_engagement');
+        }
+    });
+
+    test('product_focus intelligence only returns intelligence chunks', () => {
+        clearMceHelpCache();
+        const hits = searchMceHelp('data pipeline', 5, 'intelligence');
+        assert.ok(hits.length > 0, 'Expected hits for intelligence scope');
+        for (const h of hits) {
+            assert.equal(h.chunk.productScope, 'marketing_cloud_intelligence');
         }
     });
 
