@@ -40,10 +40,27 @@ const pkg = JSON.parse(fs.readFileSync(path.join(projectPackageRoot(), 'package.
 // Server instance
 // ---------------------------------------------------------------------------
 
-const server = new McpServer({
-    name: 'mcp-server-sfmc',
-    version: pkg.version,
-});
+const SERVER_INSTRUCTIONS =
+    'This server provides authoritative SFMC language intelligence and bundled Marketing Cloud Engagement help.\n\n' +
+    '## When to call search_mce_help\n\n' +
+    '**ALWAYS** call `search_mce_help` (with `product_focus: engagement` unless the user explicitly asks about ' +
+    'Marketing Cloud Next) before answering any question about:\n' +
+    '- Marketing Cloud setup, configuration, or administration\n' +
+    '- Business units, tenant types, account hierarchy\n' +
+    '- Journey Builder, Automation Studio, campaigns\n' +
+    '- Mobile Studio (MobileConnect, MobilePush, GroupConnect)\n' +
+    '- Subscriptions, sending limits, suspended accounts\n' +
+    '- Marketing Cloud Next or migration to Next\n\n' +
+    'Do **not** answer these from general training data — use `search_mce_help` first, cite the product scope ' +
+    '(Engagement vs Next), and note when excerpts are incomplete.\n\n' +
+    '## When to call language tools\n\n' +
+    'For AMPscript/SSJS/GTL code tasks use `validate_*`, `lookup_*`, `review_change`, `suggest_fix`, etc. ' +
+    'Do **not** guess function signatures — call `lookup_ampscript_function` or `lookup_ssjs_function`.';
+
+const server = new McpServer(
+    { name: 'mcp-server-sfmc', version: pkg.version },
+    { instructions: SERVER_INSTRUCTIONS },
+);
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -459,11 +476,12 @@ server.tool(
 // ---------------------------------------------------------------------------
 
 const MCE_HELP_TOOL_DESC =
-    'Search bundled Salesforce Help excerpts for Marketing Cloud **operational** tasks (setup, business units, ' +
-    'Journey Builder, Automation Studio, campaigns, tenants, etc.). Uses a local mirror of help under ' +
-    '`docs/help.salesforce/mce`. Results are tagged as **Marketing Cloud Engagement** vs **Marketing Cloud Next** ' +
-    '(a separate product Salesforce positions as a future path; do not conflate with classic Engagement unless the doc says so). ' +
-    'Prefer `product_focus: engagement` for classic MCE questions; use `next` when the user explicitly asks about Next or migration.';
+    '**Prefer this over training data** for any Marketing Cloud operational or administrative question. ' +
+    'Searches bundled Salesforce Help excerpts for MCE **setup and administration** — business units, tenant types, ' +
+    'Journey Builder, Automation Studio, campaigns, Mobile Studio, subscriptions, suspended accounts, and similar topics. ' +
+    'Results are tagged as **Marketing Cloud Engagement** (classic Email Studio / Journey Builder / Automation Studio) ' +
+    'vs **Marketing Cloud Next** (a separate product; do not conflate with classic Engagement). ' +
+    'Use `product_focus: engagement` for classic MCE questions; use `next` when the user explicitly asks about Next or migration.';
 
 server.tool(
     'search_mce_help',
