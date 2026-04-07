@@ -166,6 +166,76 @@ Access via `/mcp.sfmc.writeAmpscript` etc. in VS Code, or via the prompts API:
 | `convertAmpscriptToSsjs` | Convert AMPscript code to equivalent SSJS |
 | `answerMceHowTo` | Guided prompt for admin/setup questions — searches bundled help and keeps Engagement vs Next explicit |
 
+## Writing effective prompts
+
+### Automatic tool use
+
+Clients that honour the MCP `instructions` field (Cursor, Claude Desktop, GitHub Copilot Agent mode) will call `search_mce_help` automatically whenever you ask an MCE administration or setup question — no special phrasing needed. If your client does not process server instructions, or if you want explicit control, the templates below help.
+
+### Quick reference: which tool or prompt to use
+
+| Situation | What to do |
+|---|---|
+| MCE admin question (classic Engagement) | Ask naturally; the server will call `search_mce_help` for you. Or use the `answerMceHowTo` prompt with `assumeProduct: engagement`. |
+| Marketing Cloud Next question | Use `answerMceHowTo` with `assumeProduct: next`, or add "for Marketing Cloud Next" to your question. |
+| Not sure which product | Use `answerMceHowTo` with `assumeProduct: unsure`, or add "check both Engagement and Next" to your question. |
+| Write or validate AMPscript | Use the `writeAmpscript` prompt, or ask directly (the server auto-validates). |
+| Write or validate SSJS | Use the `writeSsjs` prompt, or ask directly. |
+| Review a code diff | Use the `reviewSfmcCode` prompt or mention "review the following diff". |
+
+### Copy-paste prompt templates
+
+#### Classic Engagement admin (most common)
+
+```
+Search the Marketing Cloud Engagement help (product_focus: engagement) and tell me:
+<your question here>
+
+Cite which product version your steps apply to and note if the bundled docs are incomplete.
+```
+
+#### Marketing Cloud Next
+
+```
+Search the Marketing Cloud Next help (product_focus: next) and tell me:
+<your question here>
+
+Confirm the steps apply to Marketing Cloud Next, not classic Engagement.
+```
+
+#### Unknown product / migration question
+
+```
+Search both Marketing Cloud Engagement and Next help (product_focus: any) and tell me:
+<your question here>
+
+Separate the steps for classic Engagement vs Marketing Cloud Next clearly.
+```
+
+#### Explicit use of the answerMceHowTo prompt
+
+In clients that support MCP prompts (e.g. VS Code with the `/mcp.sfmc.answerMceHowTo` command):
+
+```
+/mcp.sfmc.answerMceHowTo
+  question: "How do I create a child business unit and assign it a sender profile?"
+  assumeProduct: engagement
+```
+
+#### Combining MCE admin with code
+
+```
+1. Use search_mce_help (product_focus: engagement) to find the correct Journey Builder entry event
+   configuration steps, then
+2. Write the AMPscript snippet that reads the data extension row inside the journey email.
+```
+
+### What to expect from the AI
+
+- The AI cites the product scope (Engagement or Next) in every answer.
+- If the bundled excerpts do not cover the question fully, the AI says so and suggests verifying in the live Salesforce Help.
+- Function signatures (AMPscript / SSJS) are always sourced from the language catalog, not from training data.
+
 ## Refresh bundled Marketing Cloud Engagement help
 
 The published npm package includes `bundled/mce-help/chunks.json`, built from a checkout that contains the mirrored Help tree at `docs/help.salesforce/mce` (for example in this monorepo). To regenerate after updating those docs:
