@@ -43,7 +43,7 @@ None of these replace the VS Code extension for **editing** (syntax, LSP, snippe
 | **Completions** | AMPscript function/keyword completions, SSJS Platform API catalog |
 | **Prompts** | Guided prompts for writing AMPscript, SSJS, reviewing code, and converting between the two |
 | **Resources** | Full function catalogs, keyword list, unsupported ES6+ syntax list |
-| **MCE help search** | Bundled excerpts from local Help mirrors (`docs/help.salesforce/mce`) with Engagement vs Next labeling |
+| **MCE help search** | Bundled excerpts from mirrored Salesforce Help (MCE vs Next scoped) |
 
 ## Quick start
 
@@ -238,7 +238,7 @@ In clients that support MCP prompts (e.g. VS Code with the `/mcp.sfmc.answerMceH
 
 ## Refresh bundled Marketing Cloud Engagement help
 
-The published npm package includes `bundled/mce-help/chunks.json`, built from a checkout that contains the mirrored Help tree at `docs/help.salesforce/mce` (for example in this monorepo). To regenerate after updating those docs:
+The published npm package includes `bundled/mce-help/chunks.json`, produced by `npm run bundle-mce-help`. By default the bundler uses the path in **`MCE_HELP_DOCS`** (see `scripts/bundle-mce-help.mjs`); set it to the root of your mirrored MCE Help Markdown tree when not using the maintainer default.
 
 ```bash
 cd mcp-server-sfmc
@@ -247,7 +247,7 @@ npm run build
 npm test
 ```
 
-Override the source path: `MCE_HELP_DOCS=/absolute/path/to/mce npm run bundle-mce-help`
+Example: `MCE_HELP_DOCS=/absolute/path/to/mce-help-mirror npm run bundle-mce-help`
 
 ## AI code review in pull requests
 

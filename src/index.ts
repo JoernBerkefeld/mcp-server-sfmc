@@ -517,8 +517,8 @@ server.tool(
             const stats = getMceHelpStats();
             const hint =
                 stats.chunkCount === 0
-                    ? 'Bundled help index missing. Run `npm run bundle-mce-help` from the package folder with ' +
-                      '`docs/help.salesforce/mce` present, or set `MCE_HELP_DOCS` to that tree.'
+                    ? 'Bundled help index missing. Run `npm run bundle-mce-help` from the package folder and set ' +
+                      '`MCE_HELP_DOCS` to the root of your mirrored Help Markdown tree (see `scripts/bundle-mce-help.mjs`).'
                     : `No matches for this query with product_focus="${focus}". Try broader keywords or product_focus="any".`;
             return { content: [{ type: 'text', text: hint }] };
         }
