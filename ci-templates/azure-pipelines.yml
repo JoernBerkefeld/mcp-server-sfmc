@@ -52,3 +52,13 @@ steps:
       npx eslint --format stylish $CHANGED
     displayName: "Run SFMC lint"
     failOnStderr: false
+
+  - script: npm install --no-save mcp-server-sfmc@latest
+    displayName: "Install mcp-server-sfmc (sfmc-review-diff)"
+
+  - script: |
+      set -e
+      git fetch origin "$(System.PullRequest.TargetBranch)" --unshallow 2>/dev/null || git fetch origin "$(System.PullRequest.TargetBranch)" --depth=500
+      git diff "origin/$(System.PullRequest.TargetBranch)...HEAD" | npx sfmc-review-diff
+    displayName: "MCP diff review (sfmc-review-diff)"
+    failOnStderr: false

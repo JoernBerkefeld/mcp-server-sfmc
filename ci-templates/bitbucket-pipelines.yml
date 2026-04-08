@@ -36,7 +36,22 @@ definitions:
             echo "$CHANGED"
             npx eslint --format stylish $CHANGED
 
+    - step: &sfmc-review-diff
+        name: MCP diff review (sfmc-review-diff)
+        script:
+          - npm install --no-save mcp-server-sfmc@latest
+          - |
+            if [ -n "$BITBUCKET_PR_DESTINATION_BRANCH" ]; then
+              git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH" --depth=500
+              git diff "origin/$BITBUCKET_PR_DESTINATION_BRANCH"...HEAD | npx sfmc-review-diff
+            else
+              echo "Not a PR build — skipping sfmc-review-diff."
+              exit 0
+            fi
+
 pipelines:
   pull-requests:
     "**":
-      - step: *sfmc-lint
+      - parallel:
+          - step: *sfmc-lint
+          - step: *sfmc-review-diff

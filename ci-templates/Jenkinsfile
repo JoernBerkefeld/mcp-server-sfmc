@@ -54,5 +54,18 @@ export default [...sfmc.configs.recommended];
                 }
             }
         }
+
+        stage('MCP diff review') {
+            when {
+                changeRequest()
+            }
+            steps {
+                script {
+                    sh 'npm install --no-save mcp-server-sfmc@latest'
+                    sh 'git fetch origin +refs/heads/$CHANGE_TARGET:refs/remotes/origin/$CHANGE_TARGET --depth=500 || true'
+                    sh 'git diff origin/$CHANGE_TARGET...HEAD | npx sfmc-review-diff'
+                }
+            }
+        }
     }
 }
