@@ -1,0 +1,86 @@
+# place this file in .github/workflows
+name: SFMC Code Quality
+
+on:
+  pull_request:
+    paths:
+      - "**/*.amp"
+      - "**/*.ampscript"
+      - "**/*.ssjs"
+      - "**/*.html"
+
+jobs:
+  lint-sfmc:
+    name: Lint AMPscript & SSJS
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install eslint-plugin-sfmc
+        run: npm install --no-save eslint eslint-plugin-sfmc
+
+      - name: Create ESLint config
+        run: |
+          cat > eslint.config.mjs << 'EOF'
+          import sfmc from 'eslint-plugin-sfmc';
+          export default [
+            ...sfmc.configs.recommended,
+          ];
+          EOF
+
+      - name: Run ESLint on changed files
+        id: lint
+        run: |
+          # Get changed files
+          git fetch origin ${{ github.base_ref }} --depth=1
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            | grep -E '\.(amp|ampscript|ssjs|html)$' || true)
+
+          if [ -z "$CHANGED" ]; then
+            echo "No SFMC files changed."
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Linting files:"
+          echo "$CHANGED"
+
+          # Run eslint and capture output
+          OUTPUT=$(npx eslint --format stylish $CHANGED 2>&1 || true)
+          echo "$OUTPUT"
+
+          if echo "$OUTPUT" | grep -q "error"; then
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+            echo "lint_output<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$OUTPUT" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Comment on PR
+        if: steps.lint.outputs.result == 'fail'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `${{ steps.lint.outputs.lint_output }}`;
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## SFMC Lint Results\n\n\`\`\`\n${output}\n\`\`\`\n\n> Run by [SFMC Code Quality workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`
+            });
+
+      - name: Fail if errors found
+        if: steps.lint.outputs.result == 'fail'
+        run: exit 1
