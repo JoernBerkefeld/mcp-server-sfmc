@@ -35,7 +35,15 @@ sfmc-lint:
       fi
       npx eslint --format stylish $CHANGED
   allow_failure: false
-  artifacts:
-    when: on_failure
-    reports:
-      junit: eslint-report.xml
+
+sfmc-review-diff:
+  stage: lint
+  image: node:20-alpine
+  variables:
+    GIT_DEPTH: "0"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - npm install --no-save mcp-server-sfmc@latest
+    - git diff "$CI_MERGE_REQUEST_DIFF_BASE_SHA...HEAD" | npx sfmc-review-diff
+  allow_failure: false

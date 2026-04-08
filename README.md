@@ -29,8 +29,13 @@ You **do not** have to install the VS Code extension. Pick one way to run the se
 | **`npx` (no install)** | Default in the examples below. Runs the latest published version from npm on demand; first run may download the package. **Requires Node.js and npm** (which provides `npx`). |
 | **`npm install -g mcp-server-sfmc`** | Same CLI as `npx`, but the package stays on disk so **startup is faster** and you can set `"command": "mcp-server-sfmc"` with empty `args` in your MCP config. |
 | **`npm install mcp-server-sfmc` in a project** | Keeps a **pinned version** in that folder’s `node_modules` — point your MCP config at `npx mcp-server-sfmc` with `cwd` set to the project, or run `./node_modules/.bin/mcp-server-sfmc` directly. |
+| **`sfmc-review-diff` (bundled CLI)** | For **CI**: spawns this MCP server, calls `review_change` on a unified diff (stdin or file), exits non-zero on `ERROR` by default. Install the package in the job, then e.g. `git diff base...HEAD \| npx sfmc-review-diff`. |
 
 None of these replace the VS Code extension for **editing** (syntax, LSP, snippets); they only expose the **MCP server** to tools that speak the Model Context Protocol.
+
+## CI templates and `sfmc-review-diff`
+
+Ready-to-copy workflows (GitHub Actions, GitLab CI, Jenkins, Azure Pipelines, Bitbucket Pipelines) live under **[`ci-templates/`](./ci-templates/)**. They run **`eslint-plugin-sfmc`** on changed files and **`sfmc-review-diff`** on the PR/MR unified diff. See **[`ci-templates/README.md`](./ci-templates/README.md)** for what each file does and how the two checks differ.
 
 ## What it gives your AI assistant
 
