@@ -19,7 +19,10 @@ export interface SeverityCounts {
     infos: number;
 }
 
-/** Counts diagnostic lines emitted by the review_change tool (see src/index.ts). */
+/**
+ * Counts diagnostic lines emitted by the review_change tool (see src/index.ts).
+ * @param output
+ */
 export function countReviewSeverities(output: string): SeverityCounts {
     let errors = 0;
     let warnings = 0;
@@ -32,12 +35,14 @@ export function countReviewSeverities(output: string): SeverityCounts {
     return { errors, warnings, infos };
 }
 
-/** Whether the CLI should exit with code 1 given counts and --fail-on policy. */
+/**
+ * Whether the CLI should exit with code 1 given counts and --fail-on policy.
+ * @param counts
+ * @param failOn
+ */
 export function shouldFail(counts: SeverityCounts, failOn: FailOnLevel): boolean {
     if (counts.errors > 0) return true;
-    if (failOn === 'warning' || failOn === 'info') {
-        if (counts.warnings > 0) return true;
-    }
+    if ((failOn === 'warning' || failOn === 'info') && counts.warnings > 0) return true;
     if (failOn === 'info' && counts.infos > 0) return true;
     return false;
 }
@@ -125,7 +130,9 @@ function parseArgs(argv: string[]): ParsedArgs {
         if (a === '--fail-on') {
             const v = argv[++i];
             if (v !== 'error' && v !== 'warning' && v !== 'info') {
-                throw new Error(`--fail-on must be error, warning, or info, got: ${v ?? '(missing)'}`);
+                throw new Error(
+                    `--fail-on must be error, warning, or info, got: ${v ?? '(missing)'}`
+                );
             }
             failOn = v;
             continue;
@@ -140,7 +147,7 @@ function parseArgs(argv: string[]): ParsedArgs {
         }
         if (a === '--max-problems') {
             const v = argv[++i];
-            const n = v ? parseInt(v, 10) : NaN;
+            const n = v ? Number.parseInt(v, 10) : Number.NaN;
             if (!Number.isFinite(n) || n < 1) {
                 throw new Error(`--max-problems must be a positive integer`);
             }
@@ -180,8 +187,8 @@ async function main(): Promise<void> {
     let parsed: ParsedArgs;
     try {
         parsed = parseArgs(process.argv.slice(2));
-    } catch (e) {
-        console.error(String(e instanceof Error ? e.message : e));
+    } catch (ex) {
+        console.error(String(ex instanceof Error ? ex.message : ex));
         process.exit(1);
     }
 
@@ -190,12 +197,7 @@ async function main(): Promise<void> {
         process.exit(0);
     }
 
-    let diffText: string;
-    if (parsed.filePath) {
-        diffText = readFileSync(parsed.filePath, 'utf8');
-    } else {
-        diffText = await readStdin();
-    }
+    const diffText = parsed.filePath ? readFileSync(parsed.filePath, 'utf8') : await readStdin();
 
     const serverPath = serverEntryPath();
     const cwd = projectRoot();
@@ -236,8 +238,8 @@ async function main(): Promise<void> {
             process.exit(1);
         }
         process.exit(0);
-    } catch (err) {
-        console.error(String(err instanceof Error ? err.message : err));
+    } catch (ex) {
+        console.error(String(ex instanceof Error ? ex.message : ex));
         process.exit(1);
     } finally {
         try {

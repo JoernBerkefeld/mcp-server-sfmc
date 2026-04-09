@@ -49,7 +49,7 @@ const FOLDER_TO_SCOPE = {
  * @returns {ProductScope}
  */
 function inferProductScope(relPath) {
-    const p = relPath.replace(/\\/g, '/').toLowerCase();
+    const p = relPath.replaceAll('\\', '/').toLowerCase();
     const topFolder = p.split('/')[0];
     if (FOLDER_TO_SCOPE[topFolder]) {
         return FOLDER_TO_SCOPE[topFolder];
@@ -125,11 +125,11 @@ function chunkMarkdownFile(fullPath, relPath) {
         if (body.length > MAX_BODY) {
             body = `${body.slice(0, MAX_BODY)}\n\n…`;
         }
-        const id = `${relPath.replace(/\\/g, '/')}#${i++}`;
+        const id = `${relPath.replaceAll('\\', '/')}#${i++}`;
         chunks.push({
             id,
             file: fileBase,
-            relativePath: relPath.replace(/\\/g, '/'),
+            relativePath: relPath.replaceAll('\\', '/'),
             heading,
             body,
             productScope,
@@ -173,7 +173,7 @@ function main() {
         process.stderr.write(
             'bundle-mce-help: no source directory found. Set MCE_HELP_DOCS or place docs at ' +
                 path.join('docs', 'help.salesforce', 'mce') +
-                ' relative to the monorepo root.\n',
+                ' relative to the monorepo root.\n'
         );
         process.exit(1);
     }
@@ -193,11 +193,11 @@ function main() {
 
     fs.mkdirSync(OUT_DIR, { recursive: true });
     const monorepoRoot = path.join(packageRoot, '..');
-    let sourceDirRecorded = sourceDir.replace(/\\/g, '/');
+    let sourceDirRecorded = sourceDir.replaceAll('\\', '/');
     try {
         const rel = path.relative(monorepoRoot, sourceDir);
         if (rel && !rel.startsWith('..')) {
-            sourceDirRecorded = rel.replace(/\\/g, '/');
+            sourceDirRecorded = rel.replaceAll('\\', '/');
         }
     } catch {
         /* keep absolute */
@@ -211,7 +211,7 @@ function main() {
     fs.writeFileSync(OUT_FILE, JSON.stringify(payload), 'utf8');
     const mb = (Buffer.byteLength(JSON.stringify(payload), 'utf8') / (1024 * 1024)).toFixed(2);
     process.stderr.write(
-        `bundle-mce-help: wrote ${all.length} chunks from ${files.length} files (${mb} MiB) -> ${path.relative(packageRoot, OUT_FILE)}\n`,
+        `bundle-mce-help: wrote ${all.length} chunks from ${files.length} files (${mb} MiB) -> ${path.relative(packageRoot, OUT_FILE)}\n`
     );
 }
 

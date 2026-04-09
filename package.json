@@ -3,7 +3,7 @@
     "version": "0.3.0",
     "mcpName": "io.github.JoernBerkefeld/mcp-server-sfmc",
     "description": "SFMC AMPscript/SSJS/GTL tools and searchable Marketing Cloud Engagement help (MCE vs Next scoped) via MCP.",
-    "author": "Jörn Berkefeld",
+    "author": "JÃ¶rn Berkefeld",
     "license": "MIT",
     "repository": {
         "type": "git",
@@ -50,7 +50,11 @@
         "review-diff": "node dist/cli/reviewDiff.js",
         "pretest": "npm run build",
         "test": "node --test tests/*.test.mjs",
-        "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\""
+        "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+        "lint": "eslint .",
+        "lint:fix": "eslint --fix .",
+        "format": "prettier --write .",
+        "format:check": "prettier --check ."
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
@@ -60,6 +64,16 @@
         "node": ">=18.0.0"
     },
     "devDependencies": {
-        "@types/node": "^22.19.17"
+        "@eslint/js": "^10.0.1",
+        "@types/node": "^22.19.17",
+        "eslint": "^10.1.0",
+        "eslint-config-prettier": "^10.1.8",
+        "eslint-plugin-jsdoc": "^62.0.0",
+        "eslint-plugin-prettier": "^5.5.0",
+        "eslint-plugin-unicorn": "^64.0.0",
+        "globals": "^17.4.0",
+        "prettier": "^3.8.1",
+        "typescript": "^5.9.3",
+        "typescript-eslint": "^8.57.2"
     }
 }

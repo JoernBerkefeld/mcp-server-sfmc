@@ -11,12 +11,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { sfmcLanguageService, validateAmpscript, validateSsjs, validateGtlBlocks } from 'sfmc-language-lsp';
 import {
-    clearMceHelpCache,
-    getMceHelpStats,
-    searchMceHelp,
-} from '../dist/mce-help-search.js';
+    sfmcLanguageService,
+    validateAmpscript,
+    validateSsjs,
+    validateGtlBlocks,
+} from 'sfmc-language-lsp';
+import { clearMceHelpCache, getMceHelpStats, searchMceHelp } from '../dist/mce-help-search.js';
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(testsDir, '..');
@@ -40,7 +41,10 @@ describe('validate_ampscript tool logic', () => {
         const code = '%%[ SET @x = "value"';
         const diags = validateAmpscript(code, { maxNumberOfProblems: 100 });
         assert.ok(diags.length > 0);
-        assert.ok(diags[0].message.includes('Unclosed') || diags[0].message.toLowerCase().includes('block'));
+        assert.ok(
+            diags[0].message.includes('Unclosed') ||
+                diags[0].message.toLowerCase().includes('block')
+        );
     });
 
     test('reports unknown AMPscript function', () => {
@@ -77,7 +81,13 @@ describe('validate_ssjs tool logic', () => {
         const code = '<script runat="server">\nvar fn = (x) => { return x; };\n</script>';
         const diags = validateSsjs(code, { maxNumberOfProblems: 100 });
         assert.ok(diags.length > 0, 'Should report at least one issue for arrow function');
-        assert.ok(diags.some((d) => d.message.toLowerCase().includes('arrow') || d.message.toLowerCase().includes('function expression')));
+        assert.ok(
+            diags.some(
+                (d) =>
+                    d.message.toLowerCase().includes('arrow') ||
+                    d.message.toLowerCase().includes('function expression')
+            )
+        );
     });
 });
 
@@ -159,7 +169,9 @@ describe('lookup_ssjs_function tool logic', () => {
 describe('review_change tool logic', () => {
     test('detects issues in added AMPscript lines', () => {
         const addedCode = 'SET @x = BadFunction("arg")';
-        const diags = validateAmpscript('%%[\n' + addedCode + '\n]%%', { maxNumberOfProblems: 100 });
+        const diags = validateAmpscript('%%[\n' + addedCode + '\n]%%', {
+            maxNumberOfProblems: 100,
+        });
         assert.ok(diags.some((d) => d.message.toLowerCase().includes('unknown')));
     });
 
@@ -189,7 +201,9 @@ describe('catalog resources logic', () => {
 
     test('getAmpscriptKeywords returns common keywords', () => {
         const kws = sfmcLanguageService.getAmpscriptKeywords();
-        assert.ok(kws.includes('if') || kws.includes('IF') || kws.some((k) => k.toLowerCase() === 'if'));
+        assert.ok(
+            kws.includes('if') || kws.includes('IF') || kws.some((k) => k.toLowerCase() === 'if')
+        );
         assert.ok(kws.some((k) => k.toLowerCase() === 'set'));
     });
 
@@ -215,14 +229,22 @@ describe('catalog resources logic', () => {
 describe('get_ampscript_completions tool logic', () => {
     test('returns completions inside AMPscript block', () => {
         const code = '%%[\n  ';
-        const doc = { text: code, languageId: /** @type {'ampscript'} */ ('ampscript'), uri: 'test' };
+        const doc = {
+            text: code,
+            languageId: /** @type {'ampscript'} */ ('ampscript'),
+            uri: 'test',
+        };
         const items = sfmcLanguageService.getCompletions(doc, { line: 1, character: 2 });
         assert.ok(items.length > 0, 'Should return completions inside block');
     });
 
     test('returns no completions outside AMPscript block', () => {
         const code = '<html>\n<body>Hello</body>\n</html>';
-        const doc = { text: code, languageId: /** @type {'ampscript'} */ ('ampscript'), uri: 'test' };
+        const doc = {
+            text: code,
+            languageId: /** @type {'ampscript'} */ ('ampscript'),
+            uri: 'test',
+        };
         const items = sfmcLanguageService.getCompletions(doc, { line: 1, character: 5 });
         assert.equal(items.length, 0);
     });
@@ -235,8 +257,10 @@ describe('get_ampscript_completions tool logic', () => {
 describe('format_sfmc_code tool logic', () => {
     test('uppercases AMPscript keywords', () => {
         const code = '%%[\nif @x == 1 then\nset @y = 2\nendif\n]%%';
-        const formatted = code
-            .replace(/\b(if|elseif|else|endif|for|to|downto|step|next|set|var|do|output)\b/gi, (m) => m.toUpperCase());
+        const formatted = code.replaceAll(
+            /\b(if|elseif|else|endif|for|to|downto|step|next|set|var|do|output)\b/gi,
+            (m) => m.toUpperCase()
+        );
         assert.ok(formatted.includes('IF'));
         assert.ok(formatted.includes('SET'));
         assert.ok(formatted.includes('ENDIF'));
@@ -244,9 +268,9 @@ describe('format_sfmc_code tool logic', () => {
 
     test('normalises SSJS Platform.Load to double quotes', () => {
         const code = "Platform.Load('core', '1.1.5');";
-        const formatted = code.replace(
+        const formatted = code.replaceAll(
             /Platform\.Load\s*\(\s*'([^']*)'\s*,\s*'([^']*)'\s*\)/g,
-            'Platform.Load("$1", "$2")',
+            'Platform.Load("$1", "$2")'
         );
         assert.equal(formatted, 'Platform.Load("core", "1.1.5");');
     });
@@ -260,17 +284,35 @@ describe('search_mce_help index', () => {
     test('bundled chunks exist and are split by product scope', () => {
         clearMceHelpCache();
         const stats = getMceHelpStats();
-        assert.ok(stats.chunkCount > 0, 'Expected bundled/mce-help/chunks.json with at least one chunk');
+        assert.ok(
+            stats.chunkCount > 0,
+            'Expected bundled/mce-help/chunks.json with at least one chunk'
+        );
         assert.ok(stats.engagementChunks > 0, 'Expected Marketing Cloud Engagement sections');
         assert.ok(stats.nextChunks > 0, 'Expected Marketing Cloud Next sections');
         // Verify breakdown covers all 7 product areas
         const scopes = Object.keys(stats.breakdown);
-        assert.ok(scopes.includes('marketing_cloud_engagement'), 'breakdown missing marketing_cloud_engagement');
-        assert.ok(scopes.includes('marketing_cloud_next'), 'breakdown missing marketing_cloud_next');
+        assert.ok(
+            scopes.includes('marketing_cloud_engagement'),
+            'breakdown missing marketing_cloud_engagement'
+        );
+        assert.ok(
+            scopes.includes('marketing_cloud_next'),
+            'breakdown missing marketing_cloud_next'
+        );
         assert.ok(scopes.includes('loyalty_management'), 'breakdown missing loyalty_management');
-        assert.ok(scopes.includes('marketing_cloud_personalization'), 'breakdown missing marketing_cloud_personalization');
-        assert.ok(scopes.includes('marketing_cloud_account_engagement'), 'breakdown missing marketing_cloud_account_engagement');
-        assert.ok(scopes.includes('marketing_cloud_intelligence'), 'breakdown missing marketing_cloud_intelligence');
+        assert.ok(
+            scopes.includes('marketing_cloud_personalization'),
+            'breakdown missing marketing_cloud_personalization'
+        );
+        assert.ok(
+            scopes.includes('marketing_cloud_account_engagement'),
+            'breakdown missing marketing_cloud_account_engagement'
+        );
+        assert.ok(
+            scopes.includes('marketing_cloud_intelligence'),
+            'breakdown missing marketing_cloud_intelligence'
+        );
     });
 
     test('finds setup-related content for a typical admin query', () => {
@@ -307,8 +349,8 @@ describe('search_mce_help index', () => {
         for (const h of hits) {
             assert.ok(
                 h.chunk.productScope === 'marketing_cloud_personalization' ||
-                h.chunk.productScope === 'salesforce_personalization',
-                `Unexpected scope: ${h.chunk.productScope}`,
+                    h.chunk.productScope === 'salesforce_personalization',
+                `Unexpected scope: ${h.chunk.productScope}`
             );
         }
     });
@@ -365,7 +407,7 @@ describe('MCP Registry manifest', () => {
         const server = readRepoJson('server.json');
         assert.ok(
             server.description.length <= 100,
-            `server.json description is ${server.description.length} chars (max 100)`,
+            `server.json description is ${server.description.length} chars (max 100)`
         );
     });
 });
