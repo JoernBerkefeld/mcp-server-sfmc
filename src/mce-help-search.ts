@@ -99,8 +99,15 @@ function matchesFocus(chunk: MceHelpChunk, focus: MceProductFocus): boolean {
 
 /**
  * Rank chunks by simple term overlap + heading bonus (same idea as mcdev wiki search).
+ * @param query
+ * @param limit
+ * @param productFocus
  */
-export function searchMceHelp(query: string, limit: number, productFocus: MceProductFocus = 'any'): MceSearchHit[] {
+export function searchMceHelp(
+    query: string,
+    limit: number,
+    productFocus: MceProductFocus = 'any'
+): MceSearchHit[] {
     const terms = tokenize(query);
     if (terms.length === 0) return [];
 

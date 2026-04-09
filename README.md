@@ -50,7 +50,7 @@ Ready-to-copy workflows (GitHub Actions, GitLab CI, Jenkins, Azure Pipelines, Bi
 | **Resources** | Full function catalogs, keyword list, unsupported ES6+ syntax list |
 | **MCE help search** | Bundled excerpts from mirrored Salesforce Help (MCE vs Next scoped) |
 
-## Quick start
+## Connecting AI clients
 
 ### VS Code (1.99+) + GitHub Copilot — manual `mcp.json`
 
