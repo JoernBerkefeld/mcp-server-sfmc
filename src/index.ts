@@ -248,7 +248,8 @@ server.tool(
 server.tool(
     'lookup_ssjs_function',
     'Look up the signature, parameters, and description for an SSJS function or method. ' +
-        'Searches Platform functions, WSProxy methods, HTTP methods, and global functions. Case-insensitive.',
+        'Searches Platform functions, WSProxy methods, HTTP methods, and global functions. Case-insensitive. ' +
+        'Surfaces deprecation warnings, Platform.Load requirements, static/alias metadata when available.',
     {
         name: z
             .string()
@@ -285,8 +286,24 @@ server.tool(
             )
             .join('\n');
 
+        const badges: string[] = [];
+        if (fn.deprecated) {
+            badges.push('⚠️ **Deprecated** — avoid in new code.');
+        }
+        if (fn.requiresCoreLoad) {
+            badges.push(
+                '⚠️ **Requires** `Platform.Load("core", "1.1.5")` before calling this method.'
+            );
+        }
+
+        const header = fn.isStatic ? `## ${fn.name} *(static)*` : `## ${fn.name}`;
+        const badgeBlock = badges.length > 0 ? badges.join('\n') + '\n\n' : '';
+        const aliasLine = fn.aliasOf ? `**Alias of:** \`${fn.aliasOf}\`\n\n` : '';
+
         const text =
-            `## ${fn.name}\n\n` +
+            `${header}\n\n` +
+            badgeBlock +
+            aliasLine +
             `**Description:** ${fn.description ?? ''}\n\n` +
             `**Parameters:**\n${params || '  (none)'}\n\n` +
             `**Returns:** ${fn.returnType ?? 'void'}`;
