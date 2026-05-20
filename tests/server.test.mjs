@@ -160,6 +160,33 @@ describe('lookup_ssjs_function tool logic', () => {
         const fn = sfmcLanguageService.lookupSsjsFunction('totallyMadeUpFn999');
         assert.equal(fn, null);
     });
+
+    test('deprecated function exposes deprecated: true', () => {
+        // ContentArea is a known deprecated SSJS function
+        const fn = sfmcLanguageService.lookupSsjsFunction('ContentArea');
+        assert.ok(fn, 'ContentArea should be found');
+        assert.equal(fn.deprecated, true, 'ContentArea should be deprecated');
+    });
+
+    test('non-deprecated function does not have deprecated flag', () => {
+        const fn = sfmcLanguageService.lookupSsjsFunction('Lookup');
+        assert.ok(fn, 'Lookup should be found');
+        assert.ok(!fn.deprecated, 'Lookup should not be deprecated');
+    });
+
+    test('requiresCoreLoad function exposes requiresCoreLoad: true', () => {
+        // Get / Post are Core library HTTP methods that need Platform.Load
+        const fn = sfmcLanguageService.lookupSsjsFunction('Get');
+        assert.ok(fn, 'Get should be found');
+        assert.equal(fn.requiresCoreLoad, true, 'Get should require Core load');
+    });
+
+    test('Platform function does not require Core load', () => {
+        // Platform.Function.Lookup is available without Platform.Load
+        const fn = sfmcLanguageService.lookupSsjsFunction('Lookup');
+        assert.ok(fn, 'Lookup should be found');
+        assert.ok(!fn.requiresCoreLoad, 'Lookup should not require Core load');
+    });
 });
 
 // ---------------------------------------------------------------------------
