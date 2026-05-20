@@ -1,6 +1,6 @@
 {
     "name": "mcp-server-sfmc",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "mcpName": "io.github.JoernBerkefeld/mcp-server-sfmc",
     "description": "SFMC AMPscript/SSJS/GTL tools and searchable Marketing Cloud Engagement help (MCE vs Next scoped) via MCP.",
     "author": "JÃ¶rn Berkefeld",
@@ -59,7 +59,7 @@
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
-        "sfmc-language-lsp": "^0.1.3"
+        "sfmc-language-lsp": "^0.2.2"
     },
     "engines": {
         "node": ">=18.0.0"
