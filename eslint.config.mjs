@@ -13,6 +13,7 @@ export default tseslint.config(
             '**/out/**',
             '**/coverage/**',
             '**/bundled/**',
+            'ci-templates/',
         ],
     },
     eslint.configs.recommended,
