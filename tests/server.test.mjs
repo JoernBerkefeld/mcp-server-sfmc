@@ -66,7 +66,9 @@ describe('validate_ampscript tool logic', () => {
 
 describe('validate_ssjs tool logic', () => {
     test('reports no issues for valid SSJS', () => {
-        const code = '<script runat="server">\nvar x = "hello";\nWrite(x);\n</script>';
+        // Use Platform.Function.Now() with correct Core Load version — no diagnostics expected
+        const code =
+            '<script runat="server">\nPlatform.Load("Core","1.1.5");\nvar d = Platform.Function.Now();\n</script>';
         const diags = validateSsjs(code, { maxNumberOfProblems: 100 });
         assert.equal(diags.length, 0);
     });
