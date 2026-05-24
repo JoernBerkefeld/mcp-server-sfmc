@@ -88,6 +88,7 @@ function pkgVersion(): string {
 }
 
 function printHelp(): void {
+    // eslint-disable-next-line no-console -- intentional CLI help output
     console.log(`sfmc-review-diff — run MCP review_change on a unified diff (stdin or file).
 
 Usage:
@@ -188,6 +189,7 @@ async function main(): Promise<void> {
     try {
         parsed = parseArgs(process.argv.slice(2));
     } catch (ex) {
+        // eslint-disable-next-line no-console -- intentional CLI error output
         console.error(String(ex instanceof Error ? ex.message : ex));
         process.exit(1);
     }
@@ -239,6 +241,7 @@ async function main(): Promise<void> {
         }
         process.exit(0);
     } catch (ex) {
+        // eslint-disable-next-line no-console -- intentional CLI error output
         console.error(String(ex instanceof Error ? ex.message : ex));
         process.exit(1);
     } finally {
