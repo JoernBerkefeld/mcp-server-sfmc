@@ -1,0 +1,24 @@
+if [[ $SKIP_HOOKS -gt 0 ]]; then
+  echo "[PRE-COMMIT] skipping hooks (SKIP_HOOKS=$SKIP_HOOKS)"
+  exit 0
+fi
+
+echo "[PRE-COMMIT] Run lint-staged"
+npx lint-staged || {
+  echo "[PRE-COMMIT] lint-staged reported errors it could not auto-fix. Fix them manually and try again."
+  exit 1
+}
+
+echo "[PRE-COMMIT] Running build..."
+npm run build --no-workspaces || {
+  echo "[PRE-COMMIT] Build failed. Fix the errors above and try again."
+  exit 1
+}
+
+echo "[PRE-COMMIT] Running tests..."
+npm test --no-workspaces || {
+  echo "[PRE-COMMIT] Tests failed. Fix the errors above and try again."
+  exit 1
+}
+
+echo "[PRE-COMMIT] All checks passed."
