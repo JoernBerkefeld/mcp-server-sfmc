@@ -59,7 +59,7 @@
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
-        "sfmc-language-lsp": "^0.2.5"
+        "sfmc-language-lsp": "^0.2.7"
     },
     "engines": {
         "node": ">=18.0.0"
