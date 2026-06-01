@@ -911,7 +911,7 @@ server.prompt(
                         '- Wrap code in `<script runat="server">` ... `</script>`.',
                         '- Use `Platform.Load("core", "1.1.5");` before accessing Core library objects.',
                         '- Use `Platform.Function.*` for SFMC-specific functions (e.g. `Platform.Function.Lookup`).',
-                        '- For SOAP API calls, use WSProxy: `var prox = new WSProxy();`',
+                        '- For SOAP API calls, use WSProxy: `var prox = new Script.Util.WSProxy();`',
                         '- Use `Platform.Response.Write()` to output content.',
                         '',
                         `## Task`,
