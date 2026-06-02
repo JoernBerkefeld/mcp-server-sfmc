@@ -6,12 +6,12 @@
         "url": "https://github.com/JoernBerkefeld/mcp-server-sfmc",
         "source": "github"
     },
-    "version": "0.4.3",
+    "version": "0.5.0",
     "packages": [
         {
             "registryType": "npm",
             "identifier": "mcp-server-sfmc",
-            "version": "0.4.3",
+            "version": "0.5.0",
             "transport": {
                 "type": "stdio"
             }
