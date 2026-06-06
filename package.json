@@ -1,8 +1,8 @@
 {
     "name": "mcp-server-sfmc",
-    "version": "0.5.0",
+    "version": "1.0.0",
     "mcpName": "io.github.JoernBerkefeld/mcp-server-sfmc",
-    "description": "SFMC AMPscript/SSJS/GTL tools and searchable Marketing Cloud Engagement help (MCE vs Next scoped) via MCP.",
+    "description": "SFMC AMPscript/SSJS/GTL tools + searchable MCE and MCN developer docs, with full MCN platform support.",
     "author": "JÃƒÂ¶rn Berkefeld",
     "license": "MIT",
     "repository": {
@@ -44,6 +44,8 @@
     "scripts": {
         "prepublishOnly": "npm run build",
         "bundle-mce-help": "node scripts/bundle-mce-help.mjs",
+        "bundle-mcn-help": "node scripts/bundle-mcn-help.mjs",
+        "bundle-all": "npm run bundle-mce-help; npm run bundle-mcn-help",
         "build": "tsc -p tsconfig.json",
         "dev": "tsc -p tsconfig.json --watch",
         "start": "node dist/index.js",
@@ -59,7 +61,7 @@
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
-        "sfmc-language-lsp": "^0.3.0"
+        "sfmc-language-lsp": "^1.0.0"
     },
     "engines": {
         "node": ">=18.0.0"
