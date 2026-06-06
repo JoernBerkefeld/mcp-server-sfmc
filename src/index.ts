@@ -19,6 +19,10 @@ import {
     validateAmpscript,
     validateSsjs,
     validateGtlBlocks,
+    isMcnSupported,
+    getMcnApiVersion,
+    getMcnNotes,
+    extractAmpscriptFunctionCalls,
     type SfmcSettings,
 } from 'sfmc-language-lsp';
 import {
@@ -27,6 +31,15 @@ import {
     searchMceHelp,
     type MceProductFocus,
 } from './mce-help-search.js';
+import { getMcnChunks, getMcnHelpStats, searchMcnHelp } from './mcn-help-search.js';
+import {
+    CLOUDPAGES_ONLY_FUNCTIONS,
+    NON_MIGRATABLE_SSJS_PATTERNS,
+    ssjsToAmpscript,
+    ampscriptToSsjs,
+    rewriteAmpForMcn,
+    isSsjsBlockConvertible,
+} from './conversion-rules.js';
 
 function projectPackageRoot(): string {
     return path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -44,6 +57,17 @@ const pkg = JSON.parse(
 
 const SERVER_INSTRUCTIONS =
     'This server provides authoritative SFMC language intelligence and bundled Salesforce Marketing Cloud product help.\n\n' +
+    '## Target platform — detect before writing or validating code\n\n' +
+    'Before writing, validating, converting, or completing any AMPscript or SSJS code:\n' +
+    '1. Call `detect_sfmc_platform` with the project root path.\n' +
+    '   - Returns `"engagement"` (`.mcdevrc.json` found) → use `target: "engagement"`\n' +
+    '   - Returns `"next"` (`sfdx-project.json` found) → use `target: "next"`\n' +
+    '   - Returns `"unknown"` → ask the user: "Are you targeting Marketing Cloud Engagement (MCE) or Marketing Cloud Next (MCN)?"\n' +
+    '2. Pass the resolved target to all language tools (`validate_*`, `suggest_fix`, `get_*_completions`).\n' +
+    '3. When target is `"next"`: SSJS is **not supported** — do not generate SSJS. Only use AMPscript functions that are MCN-supported (check with `list_ampscript_functions` with `platform: "next"`).\n\n' +
+    '## When to call search_mcn_help\n\n' +
+    '**ALWAYS** call `search_mcn_help` before answering questions about Marketing Cloud Next **developer APIs**, ' +
+    'objects, flows, segments, transactional messages, REST/SOAP APIs, or AMPscript behavior differences in MCN.\n\n' +
     '## When to call search_mce_help\n\n' +
     '**ALWAYS** call `search_mce_help` before answering any question about the following product areas ' +
     '(use the matching `product_focus` value for best results):\n\n' +
@@ -56,7 +80,7 @@ const SERVER_INSTRUCTIONS =
     '| Subscriptions, sending limits, suspended accounts, Einstein features | `engagement` |\n' +
     '| Advertising, Distributed Marketing, Marketing Cloud Connect | `engagement` |\n' +
     '| Contact Builder, Audience Builder, Data Extensions | `engagement` |\n' +
-    '| Marketing Cloud Next, migration to Next | `next` |\n' +
+    '| Marketing Cloud Next migration, admin, setup, or operational overview | `next` |\n' +
     '| Marketing Cloud Personalization / Interaction Studio, real-time personalisation, A/B testing | `personalization` |\n' +
     '| Salesforce Personalization | `personalization` |\n' +
     '| Marketing Cloud Account Engagement / Pardot, B2B marketing automation, lead scoring | `account-engagement` |\n' +
@@ -66,7 +90,13 @@ const SERVER_INSTRUCTIONS =
     'in the answer, and note when excerpts are incomplete.\n\n' +
     '## When to call language tools\n\n' +
     'For AMPscript/SSJS/GTL code tasks use `validate_*`, `lookup_*`, `review_change`, `suggest_fix`, etc. ' +
-    'Do **not** guess function signatures — call `lookup_ampscript_function` or `lookup_ssjs_function`.';
+    'Do **not** guess function signatures — call `lookup_ampscript_function` or `lookup_ssjs_function`.\n\n' +
+    '## Unified help search shortcut\n\n' +
+    'When you already know the project root, prefer `search_help` over calling `search_mce_help` or ' +
+    '`search_mcn_help` directly. Pass `projectRoot` and `search_help` will auto-detect the platform ' +
+    'and route the query to the right doc index (or both for MCN). Only fall back to the individual ' +
+    'search tools when you need to scope by `product_focus` (MCE only) or when you are **certain** ' +
+    'which doc index to target.';
 
 const server = new McpServer(
     { name: 'mcp-server-sfmc', version: pkg.version },
@@ -117,7 +147,8 @@ function formatDiagnostics(diagnostics: ReturnType<typeof validateAmpscript>): s
 server.tool(
     'validate_ampscript',
     'Validate AMPscript code for syntax errors, unknown functions, arity mismatches, and style issues. ' +
-        'Returns a list of diagnostics with line numbers and severity.',
+        'Returns a list of diagnostics with line numbers and severity. ' +
+        "Set target to 'next' to also report functions not supported in Marketing Cloud Next.",
     {
         code: z.string().describe('The AMPscript code to validate. May include HTML context.'),
         maxProblems: z
@@ -127,9 +158,18 @@ server.tool(
             .max(500)
             .optional()
             .describe('Maximum number of problems to return (default 100).'),
+        target: z
+            .enum(['engagement', 'next'])
+            .optional()
+            .describe(
+                "Target platform. Use 'next' to flag AMPscript functions not supported in Marketing Cloud Next."
+            ),
     },
-    ({ code, maxProblems }) => {
-        const settings: SfmcSettings = { maxNumberOfProblems: maxProblems ?? 100 };
+    ({ code, maxProblems, target }) => {
+        const settings: SfmcSettings = {
+            maxNumberOfProblems: maxProblems ?? 100,
+            targetPlatform: target,
+        };
         const diagnostics = validateAmpscript(code, settings);
         return {
             content: [{ type: 'text', text: formatDiagnostics(diagnostics) }],
@@ -144,7 +184,8 @@ server.tool(
 server.tool(
     'validate_ssjs',
     'Validate SSJS (Server-Side JavaScript) code for unsupported ES6+ syntax, missing Platform.Load, ' +
-        'and incorrect usage patterns. Returns diagnostics with line numbers.',
+        'and incorrect usage patterns. Returns diagnostics with line numbers. ' +
+        "Set target to 'next' to flag all SSJS as unsupported (SSJS is not available in Marketing Cloud Next).",
     {
         code: z
             .string()
@@ -156,9 +197,18 @@ server.tool(
             .max(500)
             .optional()
             .describe('Maximum number of problems to return (default 100).'),
+        target: z
+            .enum(['engagement', 'next'])
+            .optional()
+            .describe(
+                "Target platform. Use 'next' to flag SSJS code as unsupported in Marketing Cloud Next."
+            ),
     },
-    ({ code, maxProblems }) => {
-        const settings: SfmcSettings = { maxNumberOfProblems: maxProblems ?? 100 };
+    ({ code, maxProblems, target }) => {
+        const settings: SfmcSettings = {
+            maxNumberOfProblems: maxProblems ?? 100,
+            targetPlatform: target,
+        };
         const diagnostics = validateSsjs(code, settings);
         return {
             content: [{ type: 'text', text: formatDiagnostics(diagnostics) }],
@@ -173,7 +223,8 @@ server.tool(
 server.tool(
     'validate_sfmc_html',
     'Validate an HTML file that contains embedded AMPscript and/or SSJS blocks. ' +
-        'Checks both languages and GTL template syntax.',
+        'Checks both languages and GTL template syntax. ' +
+        "Set target to 'next' to flag MCN-unsupported AMPscript functions and all SSJS as errors.",
     {
         code: z
             .string()
@@ -187,10 +238,16 @@ server.tool(
             .max(500)
             .optional()
             .describe('Maximum number of problems to return (default 100).'),
+        target: z
+            .enum(['engagement', 'next'])
+            .optional()
+            .describe(
+                "Target platform. Use 'next' to flag MCN-incompatible code (unsupported AMPscript functions and all SSJS)."
+            ),
     },
-    ({ code, maxProblems }) => {
+    ({ code, maxProblems, target }) => {
         const limit = maxProblems ?? 100;
-        const settings: SfmcSettings = { maxNumberOfProblems: limit };
+        const settings: SfmcSettings = { maxNumberOfProblems: limit, targetPlatform: target };
         const ampDiags = validateAmpscript(code, settings);
         const ssjsDiags = validateSsjs(code, settings);
         const gtlDiags: ReturnType<typeof validateAmpscript> = [];
@@ -230,14 +287,96 @@ server.tool(
 
         const examples = fn.example ? '\n\nExample:\n' + fn.example : '';
 
+        // MCN compatibility badge
+        const fnMcnSince = (fn as { mcnSince?: number | null }).mcnSince ?? null;
+        const fnMcnNotes = (fn as { mcnNotes?: string | null }).mcnNotes ?? null;
+        const mcnLine =
+            fnMcnSince === null
+                ? '\n\n❌ **Marketing Cloud Next:** Not supported'
+                : `\n\n✅ **Marketing Cloud Next:** Supported since API v${fnMcnSince}.0` +
+                  (fnMcnNotes ? `\n> **MCN Note:** ${fnMcnNotes}` : '');
+
         const text =
             `## ${fn.name}\n\n` +
             `**Category:** ${fn.category ?? 'Unknown'}\n\n` +
             `**Description:** ${fn.description ?? ''}\n\n` +
             `**Parameters:**\n${params || '  (none)'}` +
-            examples;
+            examples +
+            mcnLine;
 
         return { content: [{ type: 'text', text }] };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: list_ampscript_functions
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'list_ampscript_functions',
+    'List all AMPscript functions, optionally filtered by category and/or target platform. ' +
+        "Use platform: 'next' to return only functions supported in Marketing Cloud Next.",
+    {
+        category: z
+            .string()
+            .optional()
+            .describe(
+                'Filter by function category (case-insensitive substring match), e.g. "data extension", "string", "date".'
+            ),
+        platform: z
+            .enum(['engagement', 'next'])
+            .optional()
+            .describe(
+                "Filter by target platform. Use 'next' to show only functions available in Marketing Cloud Next (API v67.0+)."
+            ),
+    },
+    ({ category, platform }) => {
+        const all = sfmcLanguageService.listAmpscriptFunctions();
+        let filtered = all as Array<{
+            name: string;
+            category?: string;
+            description?: string;
+            mcnSince?: number | null;
+        }>;
+
+        if (platform === 'next') {
+            filtered = filtered.filter((f) => isMcnSupported(f.name));
+        }
+
+        if (category) {
+            const catLower = category.toLowerCase();
+            filtered = filtered.filter((f) => f.category?.toLowerCase().includes(catLower));
+        }
+
+        if (filtered.length === 0) {
+            return {
+                content: [{ type: 'text', text: 'No AMPscript functions match the filter.' }],
+            };
+        }
+
+        const platformHeader =
+            platform === 'next'
+                ? '*(Marketing Cloud Next — API v67.0+ supported only)*'
+                : '*(Marketing Cloud Engagement — all functions)*';
+
+        const rows = filtered
+            .map((f) => {
+                const mcnTag = getMcnApiVersion(f.name) === null ? '' : ' ✅';
+                return `- **${f.name}**${mcnTag} *(${f.category ?? 'Unknown'})*: ${f.description ?? ''}`;
+            })
+            .join('\n');
+
+        const legend =
+            platform === 'next' ? '' : '\n\n*Legend: ✅ = supported in Marketing Cloud Next*';
+
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `## AMPscript Functions ${platformHeader}\n\n${rows}${legend}`,
+                },
+            ],
+        };
     }
 );
 
@@ -394,7 +533,8 @@ server.tool(
 server.tool(
     'suggest_fix',
     'Generate a corrected version of SFMC code based on validation diagnostics. ' +
-        'Returns the original code with inline fix suggestions or a corrected replacement.',
+        'Returns the original code with inline fix suggestions or a corrected replacement. ' +
+        "Set target to 'next' to include MCN platform compatibility in the analysis.",
     {
         code: z.string().describe('The SFMC code snippet to fix.'),
         language: z
@@ -405,13 +545,19 @@ server.tool(
             .string()
             .optional()
             .describe('Optional human description of the specific issue to fix.'),
+        target: z
+            .enum(['engagement', 'next'])
+            .optional()
+            .describe(
+                "Target platform. Use 'next' to flag MCN-incompatible functions and SSJS usage."
+            ),
     },
-    ({ code, language = 'auto', issueDescription }) => {
+    ({ code, language = 'auto', issueDescription, target }) => {
         const detectedLang =
             language === 'auto'
                 ? detectLanguage(code)
                 : detectLanguage(code, language as LanguageId);
-        const settings: SfmcSettings = { maxNumberOfProblems: 50 };
+        const settings: SfmcSettings = { maxNumberOfProblems: 50, targetPlatform: target };
         const doc = { text: code, languageId: detectedLang, uri: 'fix-target' };
         const diagnostics = sfmcLanguageService.validate(doc, settings);
 
@@ -476,15 +622,34 @@ function getFixSuggestion(message: string, line: string, lang: 'ampscript' | 'ss
 
 server.tool(
     'get_ampscript_completions',
-    'Return a list of AMPscript function names, keywords, and variable names available at a given position in the code.',
+    'Return a list of AMPscript function names, keywords, and variable names available at a given position in the code. ' +
+        "Set target to 'next' to filter completions to only MCN-supported functions.",
     {
         code: z.string().describe('The full AMPscript document text.'),
         line: z.number().int().min(0).describe('Zero-based line number of the cursor position.'),
         character: z.number().int().min(0).describe('Zero-based character offset within the line.'),
+        target: z
+            .enum(['engagement', 'next'])
+            .optional()
+            .describe(
+                "Target platform. Use 'next' to return only completions supported in Marketing Cloud Next."
+            ),
     },
-    ({ code, line, character }) => {
+    ({ code, line, character, target }) => {
         const doc = { text: code, languageId: 'ampscript' as const, uri: 'completions' };
-        const items = sfmcLanguageService.getCompletions(doc, { line, character });
+        let items = sfmcLanguageService.getCompletions(doc, { line, character });
+
+        if (target === 'next') {
+            items = items.filter((item) => {
+                const label =
+                    typeof item.label === 'string'
+                        ? item.label
+                        : (item.label as { label: string }).label;
+                // Keep keywords and variables (non-function entries); filter out MCN-unsupported functions
+                return !label.includes('(') || isMcnSupported(label.replace(/\(.*/, '').trim());
+            });
+        }
+
         const formatted = items
             .slice(0, 50)
             .map((item) => {
@@ -496,6 +661,8 @@ server.tool(
             })
             .join('\n');
         const total = items.length;
+        const platformNote =
+            target === 'next' ? ' (Marketing Cloud Next — MCN-supported only)' : '';
         return {
             content: [
                 {
@@ -503,7 +670,7 @@ server.tool(
                     text:
                         total === 0
                             ? 'No completions at this position (cursor is outside an AMPscript block).'
-                            : `${total} completions available (showing up to 50):\n\n${formatted}`,
+                            : `${total} completions available${platformNote} (showing up to 50):\n\n${formatted}`,
                 },
             ],
         };
@@ -516,14 +683,32 @@ server.tool(
 
 server.tool(
     'get_ssjs_completions',
-    'Return a list of SSJS Platform functions, WSProxy methods, and other SFMC-specific identifiers available for completion.',
+    'Return a list of SSJS Platform functions, WSProxy methods, and other SFMC-specific identifiers available for completion. ' +
+        "When target is 'next', returns an empty list with a note — SSJS is not supported in Marketing Cloud Next.",
     {
         filter: z
             .string()
             .optional()
             .describe('Optional prefix filter, e.g. "Platform.Function" or "WSProxy".'),
+        target: z
+            .enum(['engagement', 'next'])
+            .optional()
+            .describe(
+                "Target platform. Use 'next' to indicate MCN context — SSJS is not available in MCN."
+            ),
     },
-    ({ filter }) => {
+    ({ filter, target }) => {
+        if (target === 'next') {
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: 'SSJS is not supported in Marketing Cloud Next (MCN). Use AMPscript instead. Call `get_ampscript_completions` with `target: "next"` for MCN-compatible function completions.',
+                    },
+                ],
+            };
+        }
+
         const items = sfmcLanguageService.getSsjsCompletionCatalog();
         const filtered = filter
             ? items.filter((item) => {
@@ -835,21 +1020,245 @@ server.resource('mce-help-index', 'sfmc://mce/help-index', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Resource: mcn-help index (bundled files)
+// ---------------------------------------------------------------------------
+
+server.resource('mcn-help-index', 'sfmc://mcn/help-index', async () => {
+    const chunks = getMcnChunks();
+    const files = [...new Set(chunks.map((c) => c.relativePath))].sort();
+    const stats = getMcnHelpStats();
+    const text =
+        `# Bundled Marketing Cloud Next developer API docs (${stats.chunkCount} sections from ${stats.fileCount} files)\n\n` +
+        `## Files\n\n` +
+        files.map((f) => `- ${f}`).join('\n');
+    return {
+        contents: [{ uri: 'sfmc://mcn/help-index', mimeType: 'text/markdown', text }],
+    };
+});
+
+// ---------------------------------------------------------------------------
+// Tool: detect_sfmc_platform
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'detect_sfmc_platform',
+    'Detect the target SFMC platform for a project by checking for sentinel files. ' +
+        'Returns "engagement" if .mcdevrc.json is present, "next" if sfdx-project.json is present, ' +
+        'or "unknown" if neither is found. Call this before writing, validating, or converting code.',
+    {
+        projectRoot: z.string().describe('Absolute path to the project root directory to inspect.'),
+    },
+    ({ projectRoot }) => {
+        if (fs.existsSync(path.join(projectRoot, '.mcdevrc.json'))) {
+            return { content: [{ type: 'text', text: 'engagement' }] };
+        }
+        if (fs.existsSync(path.join(projectRoot, 'sfdx-project.json'))) {
+            return { content: [{ type: 'text', text: 'next' }] };
+        }
+        return { content: [{ type: 'text', text: 'unknown' }] };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: search_mcn_help
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'search_mcn_help',
+    'Search bundled Marketing Cloud Next developer API documentation. ' +
+        'Covers MCN objects, flows, segments, transactional messages, AMPscript behavior in MCN, ' +
+        'and REST/SOAP API references. Use this for MCN developer questions; ' +
+        'use search_mce_help for MCN migration or operational/admin questions.',
+    {
+        query: z
+            .string()
+            .describe(
+                'The search query, e.g. "AMPscript FormatDate MCN", "transactional message API", "segment objects".'
+            ),
+        limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(20)
+            .optional()
+            .describe('Maximum number of result chunks to return (default 5).'),
+    },
+    ({ query, limit = 5 }) => {
+        const hits = searchMcnHelp(query, limit);
+        if (hits.length === 0) {
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: `No MCN developer docs found for "${query}". The bundled index may not cover this topic — check the live Salesforce developer docs at https://developer.salesforce.com/docs/marketing/marketing-cloud-growth/`,
+                    },
+                ],
+            };
+        }
+        const parts = hits.map(({ chunk }) => {
+            const header = `### ${chunk.heading}\n*Source: ${chunk.relativePath}*`;
+            return `${header}\n\n${chunk.body}`;
+        });
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `# MCN Developer Docs — "${query}" (${hits.length} results)\n\n${parts.join('\n\n---\n\n')}`,
+                },
+            ],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: search_help (unified wrapper — auto-detects platform)
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'search_help',
+    'Unified help search that automatically detects the target platform (MCE or MCN) from the project ' +
+        'root and routes the query to the right bundled doc index. For MCN projects it searches both the ' +
+        'Marketing Cloud Next developer API reference (`search_mcn_help`) and the MCN operational/admin ' +
+        'help (`search_mce_help` with product_focus:"next") and merges the results. For MCE projects it ' +
+        'searches the full MCE help index (`search_mce_help` with product_focus:"any"). ' +
+        'Pass `projectRoot` to enable auto-detection, or set `target` explicitly to skip detection.',
+    {
+        query: z.string().describe('Keywords or question text to search for.'),
+        projectRoot: z
+            .string()
+            .optional()
+            .describe(
+                'Absolute path to the project root directory. Used to auto-detect the platform by ' +
+                    'checking for `.mcdevrc.json` (MCE) or `sfdx-project.json` (MCN). ' +
+                    'Omit if you already know the target platform.'
+            ),
+        target: z
+            .enum(['engagement', 'next'])
+            .optional()
+            .describe(
+                'Override the detected platform. `engagement` → MCE help only; `next` → MCN developer ' +
+                    'docs + MCN operational help. When both `projectRoot` and `target` are given, ' +
+                    '`target` takes precedence.'
+            ),
+        limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(20)
+            .optional()
+            .describe('Maximum total results to return across all searched indexes (default 8).'),
+    },
+    ({ query, projectRoot, target, limit = 8 }) => {
+        // Resolve effective platform
+        let platform: 'engagement' | 'next' | 'unknown' = 'unknown';
+        if (target) {
+            platform = target;
+        } else if (projectRoot) {
+            if (fs.existsSync(path.join(projectRoot, '.mcdevrc.json'))) platform = 'engagement';
+            else if (fs.existsSync(path.join(projectRoot, 'sfdx-project.json'))) platform = 'next';
+        }
+
+        const sections: string[] = [];
+
+        if (platform === 'next') {
+            // MCN: search both the developer API reference and the MCN operational/admin help
+            const devHits = searchMcnHelp(query, Math.ceil(limit / 2));
+            const opsHits = searchMceHelp(query, Math.floor(limit / 2), 'next' as MceProductFocus);
+
+            if (devHits.length > 0) {
+                const parts = devHits.map(
+                    ({ chunk }) =>
+                        `### ${chunk.heading}\n*Source: ${chunk.relativePath}*\n\n${chunk.body}`
+                );
+                sections.push(`## MCN Developer API Docs\n\n${parts.join('\n\n---\n\n')}`);
+            }
+            if (opsHits.length > 0) {
+                const parts = opsHits.map((h, i) => {
+                    const excerpt = h.chunk.body.replaceAll(/\s+/g, ' ').slice(0, 520);
+                    return (
+                        `### ${i + 1}. ${h.chunk.relativePath} — ${h.chunk.heading}\n` +
+                        `**Score:** ${h.score}\n\n` +
+                        `${excerpt}${h.chunk.body.length > 520 ? '…' : ''}`
+                    );
+                });
+                sections.push(`## MCN Operational / Admin Docs\n\n${parts.join('\n\n---\n\n')}`);
+            }
+            if (sections.length === 0) {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text:
+                                `No MCN results found for "${query}". ` +
+                                'Check https://developer.salesforce.com/docs/marketing/marketing-cloud-growth/ for developer API content ' +
+                                'or https://help.salesforce.com for operational guidance.',
+                        },
+                    ],
+                };
+            }
+        } else {
+            // MCE (or unknown platform — search the full MCE help index)
+            const focus: MceProductFocus = 'any';
+            const hits = searchMceHelp(query, limit, focus);
+            if (hits.length === 0) {
+                const stats = getMceHelpStats();
+                const hint =
+                    stats.chunkCount === 0
+                        ? 'Bundled help index missing. Run `npm run bundle-mce-help` from the package folder.'
+                        : `No results found for "${query}". Try broader keywords.`;
+                return { content: [{ type: 'text', text: hint }] };
+            }
+            const parts = hits.map((h, i) => {
+                const excerpt = h.chunk.body.replaceAll(/\s+/g, ' ').slice(0, 520);
+                return (
+                    `### ${i + 1}. ${h.chunk.relativePath} — ${h.chunk.heading}\n` +
+                    `**Product:** ${h.chunk.productLabel}\n` +
+                    `**Score:** ${h.score}\n\n` +
+                    `${excerpt}${h.chunk.body.length > 520 ? '…' : ''}`
+                );
+            });
+            sections.push(parts.join('\n\n---\n\n'));
+        }
+
+        const platformLabel =
+            platform === 'next'
+                ? 'Marketing Cloud Next'
+                : platform === 'engagement'
+                  ? 'Marketing Cloud Engagement'
+                  : 'all products';
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `# Help Search — "${query}" (${platformLabel})\n\n${sections.join('\n\n---\n\n')}`,
+                },
+            ],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
 // Prompt: writeAmpscript
 // ---------------------------------------------------------------------------
 
 server.prompt(
     'writeAmpscript',
     'Generate AMPscript code for a specific task. Ensures correct syntax, proper use of delimiters, ' +
-        'and references to real SFMC functions.',
+        'and references to real SFMC functions. Supports both Marketing Cloud Engagement and Next targets.',
     {
         task: z.string().describe('Description of what the AMPscript code should do.'),
         context: z
             .string()
             .optional()
             .describe('Optional context about the email, landing page, or SFMC configuration.'),
+        target: z
+            .enum(['engagement', 'next'])
+            .optional()
+            .describe(
+                "Target platform. Use 'next' to restrict output to MCN-supported AMPscript functions only."
+            ),
     },
-    ({ task, context }) => ({
+    ({ task, context, target }) => ({
         messages: [
             {
                 role: 'user',
@@ -857,7 +1266,7 @@ server.prompt(
                     type: 'text',
                     text: [
                         'You are an expert Salesforce Marketing Cloud developer.',
-                        'Generate AMPscript code for the following task.',
+                        `Generate AMPscript code for the following task. Target platform: **${target === 'next' ? 'Marketing Cloud Next (MCN)' : 'Marketing Cloud Engagement (MCE)'}**.`,
                         '',
                         '## Rules',
                         '- Use `%%[ ]%%` for block-level code and `%%= =%%` for inline output.',
@@ -867,6 +1276,16 @@ server.prompt(
                         '- All function names are case-insensitive but conventionally PascalCase.',
                         '- Do NOT use ES6+ syntax (this is not JavaScript).',
                         '- Validate your output against the AMPscript function catalog.',
+                        target === 'next'
+                            ? [
+                                  '',
+                                  '## Marketing Cloud Next (MCN) constraints',
+                                  '- Only use functions available in MCN (API v67.0+). Call `list_ampscript_functions` with `platform: "next"` to verify.',
+                                  '- FormatDate uses Java SimpleDateFormat patterns (not .NET). Example: `yyyy-MM-dd` instead of `yyyy-MM-dd`.',
+                                  '- Lookup requires an even number of search arguments (column/value pairs).',
+                                  '- StringToDate returns a locale-formatted string in MCN — do not chain it with FormatDate.',
+                              ].join('\n')
+                            : '',
                         '',
                         `## Task`,
                         task,
@@ -887,39 +1306,60 @@ server.prompt(
 server.prompt(
     'writeSsjs',
     'Generate SSJS (Server-Side JavaScript) code for a specific task. Ensures ES5-compatible syntax and ' +
-        'correct use of SFMC Platform APIs.',
+        'correct use of SFMC Platform APIs. If target is "next", redirects to AMPscript instead.',
     {
         task: z.string().describe('Description of what the SSJS code should do.'),
         context: z
             .string()
             .optional()
             .describe('Optional context about the SFMC environment or assets involved.'),
+        target: z
+            .enum(['engagement', 'next'])
+            .optional()
+            .describe(
+                "Target platform. If 'next', the prompt will explain that SSJS is not supported and suggest AMPscript alternatives."
+            ),
     },
-    ({ task, context }) => ({
+    ({ task, context, target }) => ({
         messages: [
             {
                 role: 'user',
                 content: {
                     type: 'text',
-                    text: [
-                        'You are an expert Salesforce Marketing Cloud developer.',
-                        'Generate SSJS code for the following task.',
-                        '',
-                        '## Rules',
-                        '- SSJS runs in an ES5 engine. Use `var`, not `let`/`const`.',
-                        '- No arrow functions, template literals, destructuring, or `class`.',
-                        '- Wrap code in `<script runat="server">` ... `</script>`.',
-                        '- Use `Platform.Load("core", "1.1.5");` before accessing Core library objects.',
-                        '- Use `Platform.Function.*` for SFMC-specific functions (e.g. `Platform.Function.Lookup`).',
-                        '- For SOAP API calls, use WSProxy: `var prox = new Script.Util.WSProxy();`',
-                        '- Use `Platform.Response.Write()` to output content.',
-                        '',
-                        `## Task`,
-                        task,
-                        context ? `\n## Context\n${context}` : '',
-                    ]
-                        .filter(Boolean)
-                        .join('\n'),
+                    text:
+                        target === 'next'
+                            ? [
+                                  '⚠️ **Marketing Cloud Next (MCN) does not support SSJS.** SSJS is not available in MCN.',
+                                  '',
+                                  'Instead, use **AMPscript** — MCN supports a subset of AMPscript functions (API v67.0+).',
+                                  'Call `list_ampscript_functions` with `platform: "next"` to see which functions are available.',
+                                  'Then call `writeAmpscript` with `target: "next"` to generate MCN-compatible AMPscript code.',
+                                  '',
+                                  `## Original task (for AMPscript rewrite reference)`,
+                                  task,
+                                  context ? `\n## Context\n${context}` : '',
+                              ]
+                                  .filter(Boolean)
+                                  .join('\n')
+                            : [
+                                  'You are an expert Salesforce Marketing Cloud developer.',
+                                  'Generate SSJS code for the following task.',
+                                  '',
+                                  '## Rules',
+                                  '- SSJS runs in an ES5 engine. Use `var`, not `let`/`const`.',
+                                  '- No arrow functions, template literals, destructuring, or `class`.',
+                                  '- Wrap code in `<script runat="server">` ... `</script>`.',
+                                  '- Use `Platform.Load("core", "1.1.5");` before accessing Core library objects.',
+                                  '- Use `Platform.Function.*` for SFMC-specific functions (e.g. `Platform.Function.Lookup`).',
+                                  '- For SOAP API calls, use WSProxy: `var prox = new Script.Util.WSProxy();`',
+                                  '- Use `Platform.Response.Write()` to output content.',
+                                  '',
+                                  `## Task`,
+                                  task,
+                                  context ? `\n## Context\n${context}` : '',
+                              ]
+                                  .filter(Boolean)
+                                  .join('\n'),
                 },
             },
         ],
@@ -932,7 +1372,8 @@ server.prompt(
 
 server.prompt(
     'reviewSfmcCode',
-    'Review SFMC code for correctness, best practices, and potential issues. Provides actionable feedback.',
+    'Review SFMC code for correctness, best practices, and potential issues. Provides actionable feedback. ' +
+        "Set target to 'next' to also check for Marketing Cloud Next compatibility.",
     {
         code: z.string().describe('The SFMC code to review.'),
         language: z.enum(['ampscript', 'ssjs', 'html', 'auto']).optional(),
@@ -942,12 +1383,22 @@ server.prompt(
             .describe(
                 'Optional focus area, e.g. "security", "performance", "data extension usage".'
             ),
+        target: z
+            .enum(['engagement', 'next'])
+            .optional()
+            .describe(
+                "Target platform. Use 'next' to include MCN compatibility in the review (flags unsupported functions and SSJS)."
+            ),
     },
-    ({ code, language = 'auto', focus }) => {
+    ({ code, language = 'auto', focus, target }) => {
         const detectedLang =
             language === 'auto'
                 ? detectLanguage(code)
                 : detectLanguage(code, language as LanguageId);
+        const platformNote =
+            target === 'next'
+                ? '\n- **Marketing Cloud Next compatibility**: Flag any AMPscript functions not supported in MCN (API v67.0+), and any SSJS blocks (SSJS is not supported in MCN).'
+                : '';
         return {
             messages: [
                 {
@@ -955,7 +1406,11 @@ server.prompt(
                     content: {
                         type: 'text',
                         text: [
-                            `You are an expert Salesforce Marketing Cloud developer reviewing ${detectedLang.toUpperCase()} code.`,
+                            `You are an expert Salesforce Marketing Cloud developer reviewing ${detectedLang.toUpperCase()} code` +
+                                (target
+                                    ? ` for target platform **${target === 'next' ? 'Marketing Cloud Next (MCN)' : 'Marketing Cloud Engagement (MCE)'}**`
+                                    : '') +
+                                '.',
                             'Identify bugs, anti-patterns, performance issues, and security concerns.',
                             focus ? `Focus especially on: ${focus}` : '',
                             '',
@@ -972,14 +1427,14 @@ server.prompt(
                                       '- Correct function names and argument counts',
                                       '- Correct comment syntax (/* */ only)',
                                       '- Proper variable declaration with @',
-                                  ].join('\n')
+                                  ].join('\n') + platformNote
                                 : [
                                       '- No ES6+ syntax (var, not let/const; no arrow functions)',
                                       '- Platform.Load before Core library objects',
                                       '- Correct Platform.Function calls',
                                       '- WSProxy error handling',
                                       '- No sensitive data in logs or responses',
-                                  ].join('\n'),
+                                  ].join('\n') + platformNote,
                         ]
                             .filter(Boolean)
                             .join('\n'),
@@ -996,9 +1451,11 @@ server.prompt(
 
 server.prompt(
     'convertAmpscriptToSsjs',
-    'Convert AMPscript code to equivalent SSJS, preserving business logic while adapting to SSJS APIs.',
+    'Convert AMPscript code to equivalent SSJS, preserving business logic while adapting to SSJS APIs. ' +
+        'Calls the convertAmpscriptToSsjs tool first for deterministic rule-based conversion, ' +
+        'then applies AI reasoning to handle any MANUAL_REWRITE_REQUIRED sections.',
     {
-        ampscript: z.string().describe('The AMPscript code to convert.'),
+        ampscript: z.string().describe('The AMPscript code to convert to SSJS.'),
     },
     ({ ampscript }) => ({
         messages: [
@@ -1007,19 +1464,25 @@ server.prompt(
                 content: {
                     type: 'text',
                     text: [
-                        'Convert the following AMPscript code to equivalent SSJS.',
+                        'You are an expert Salesforce Marketing Cloud developer converting AMPscript to SSJS.',
                         '',
-                        '## Conversion rules',
-                        '- AMPscript `Lookup()` → `Platform.Function.Lookup()` in SSJS',
-                        '- AMPscript `LookupRows()` → `Platform.Function.LookupRows()` in SSJS',
-                        '- AMPscript `@variable` → `var variable` in SSJS',
-                        '- AMPscript `SET @x = value` → `var x = value;` in SSJS',
-                        '- AMPscript `IF @x == "y" THEN` → `if (x === "y") {` in SSJS',
-                        '- AMPscript `OUTPUT(CONCAT(...))` → `Platform.Response.Write(...)` in SSJS',
-                        '- AMPscript `FOR @i = 1 TO 10 DO` → `for (var i = 1; i <= 10; i++) {` in SSJS',
-                        '- Use `var`, not `let`/`const`. No arrow functions or template literals.',
+                        '## Instructions',
+                        '1. Call the `convertAmpscriptToSsjs` **tool** with the code below to get a deterministic conversion.',
+                        '2. Review the `flaggedSections` in the result — these are constructs the tool could not convert automatically.',
+                        '3. For each flagged section, apply your expertise:',
+                        '   - Email-specific functions (ContentArea, TreatAsContent, etc.) → use equivalent SSJS Content or Server.EscapeJavaScript approaches',
+                        '   - Personalization strings (%%FirstName%% etc.) → use Platform.Variable/Recipient equivalents',
+                        '   - AMPscript-only data lookups → translate to SSJS DataExtension / WSProxy where appropriate',
+                        '4. Produce a single final SSJS code block.',
+                        '5. Add a short change log as a bulleted list.',
+                        '',
+                        '## SSJS rules',
+                        '- Use `var`, not `let`/`const`. No arrow functions, template literals, or destructuring.',
                         '- Wrap in `<script runat="server">...</script>`.',
-                        '- Add `Platform.Load("core", "1.1.5");` if using DataExtension, Rows, etc.',
+                        '- Add `Platform.Load("Core", "1.1.5");` if using DataExtension, Rows, etc.',
+                        '- AMPscript functions → `Platform.Function.*` equivalents.',
+                        '- AMPscript `@variable` → bare `variable` in SSJS.',
+                        '- AMPscript `Output` / `OutputLine` → `Platform.Response.Write()`.',
                         '',
                         '## AMPscript to convert',
                         '```ampscript',
@@ -1099,6 +1562,531 @@ server.prompt(
                             question,
                         ].join('\n'),
                     },
+                },
+            ],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: check_mcn_compatibility
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'check_mcn_compatibility',
+    'Analyze one or more AMPscript/HTML files for Marketing Cloud Next (MCN) readiness. ' +
+        'Returns an executive summary and a per-file, per-function report with migration difficulty. ' +
+        'SSJS blocks that only use Platform.Function.* calls are classified as "Needs conversion" (not "Not migratable"). ' +
+        'Use this tool before using rewrite_for_mcn.',
+    {
+        files: z
+            .array(
+                z.object({
+                    filename: z.string().describe('File name (e.g. "email-template.html").'),
+                    content: z.string().describe('Full file content to analyze.'),
+                })
+            )
+            .describe('List of files to analyze.'),
+    },
+    ({ files }) => {
+        type AmpFunctionStatus = 'supported' | 'needs-review' | 'not-supported';
+        type SsjsBlockStatus = 'needs-conversion' | 'not-migratable';
+        type FileDifficulty = 'ready' | 'minor' | 'significant' | 'not-migratable';
+
+        interface AmpFunctionEntry {
+            name: string;
+            line: number;
+            status: AmpFunctionStatus;
+            reason: string;
+        }
+
+        interface SsjsBlockEntry {
+            index: number;
+            lineApprox: number;
+            status: SsjsBlockStatus;
+            reason: string;
+        }
+
+        interface FileResult {
+            filename: string;
+            difficulty: FileDifficulty;
+            ampFunctions: AmpFunctionEntry[];
+            ssjsBlocks: SsjsBlockEntry[];
+        }
+
+        const results: FileResult[] = [];
+
+        for (const { filename, content } of files) {
+            const ampFunctions: AmpFunctionEntry[] = [];
+            const ssjsBlocks: SsjsBlockEntry[] = [];
+
+            // 1. Extract and classify AMPscript function calls
+            const callSites = extractAmpscriptFunctionCalls(content);
+            for (const site of callSites) {
+                const mcnSince = getMcnApiVersion(site.name);
+                const notes = getMcnNotes(site.name);
+                let status: AmpFunctionStatus;
+                let reason: string;
+
+                if (mcnSince !== null && notes === null) {
+                    status = 'supported';
+                    reason = '—';
+                } else if (mcnSince !== null && notes !== null) {
+                    status = 'needs-review';
+                    reason = notes;
+                } else {
+                    status = 'not-supported';
+                    reason = 'No MCN equivalent';
+                    // Refine for CloudPages-specific functions
+                    if (CLOUDPAGES_ONLY_FUNCTIONS.has(site.name.toLowerCase())) {
+                        reason = `${site.name}() is a CloudPages-specific function (not available in MCN)`;
+                    }
+                }
+
+                ampFunctions.push({ name: site.name, line: site.line + 1, status, reason });
+            }
+
+            // 2. Detect and classify SSJS blocks
+            const ssjsBlockPattern =
+                /<script[^>]+runat=['"]?server['"]?[^>]*>([\s\S]*?)<\/script>/gi;
+            let blockMatch: RegExpExecArray | null;
+            let blockIndex = 0;
+            while ((blockMatch = ssjsBlockPattern.exec(content)) !== null) {
+                blockIndex++;
+                const blockCode = blockMatch[1];
+                const lineApprox = content.slice(0, blockMatch.index).split('\n').length;
+
+                // Check for non-migratable patterns
+                let notMigratableReason = '';
+                for (const { pattern, reason } of NON_MIGRATABLE_SSJS_PATTERNS) {
+                    pattern.lastIndex = 0;
+                    if (pattern.test(blockCode)) {
+                        notMigratableReason = reason;
+                        break;
+                    }
+                }
+
+                if (notMigratableReason) {
+                    ssjsBlocks.push({
+                        index: blockIndex,
+                        lineApprox,
+                        status: 'not-migratable',
+                        reason: notMigratableReason,
+                    });
+                } else {
+                    ssjsBlocks.push({
+                        index: blockIndex,
+                        lineApprox,
+                        status: 'needs-conversion',
+                        reason: 'Contains only convertible SSJS patterns — use convertSsjsToAmpscript',
+                    });
+                }
+            }
+
+            // 3. Assess per-file difficulty
+            const hasCloudPagesFn = ampFunctions.some(
+                (f) =>
+                    CLOUDPAGES_ONLY_FUNCTIONS.has(f.name.toLowerCase()) &&
+                    f.status === 'not-supported'
+            );
+            const hasNotMigratableSsjs = ssjsBlocks.some((b) => b.status === 'not-migratable');
+            const hasUnsupportedAmp = ampFunctions.some(
+                (f) =>
+                    f.status === 'not-supported' &&
+                    !CLOUDPAGES_ONLY_FUNCTIONS.has(f.name.toLowerCase())
+            );
+            const hasConvertibleSsjs = ssjsBlocks.some((b) => b.status === 'needs-conversion');
+            const hasNeedsReview = ampFunctions.some((f) => f.status === 'needs-review');
+
+            let difficulty: FileDifficulty;
+            if (hasCloudPagesFn || hasNotMigratableSsjs) {
+                difficulty = 'not-migratable';
+            } else if (hasUnsupportedAmp || hasConvertibleSsjs) {
+                difficulty = 'significant';
+            } else if (hasNeedsReview) {
+                difficulty = 'minor';
+            } else {
+                difficulty = 'ready';
+            }
+
+            results.push({ filename, difficulty, ampFunctions, ssjsBlocks });
+        }
+
+        // 4. Build Markdown report
+        const difficultyLabel: Record<string, string> = {
+            ready: 'Ready',
+            minor: 'Minor changes needed',
+            significant: 'Significant rewrite required',
+            'not-migratable': 'Not migratable',
+        };
+
+        const counts = {
+            ready: results.filter((r) => r.difficulty === 'ready').length,
+            minor: results.filter((r) => r.difficulty === 'minor').length,
+            significant: results.filter((r) => r.difficulty === 'significant').length,
+            notMigratable: results.filter((r) => r.difficulty === 'not-migratable').length,
+        };
+
+        const totalFiles = results.length;
+        const effortLevels =
+            counts.notMigratable > 0
+                ? 'Not possible'
+                : counts.significant > 0
+                  ? 'Hard'
+                  : counts.minor > 0
+                    ? 'Medium'
+                    : 'Easy';
+
+        const summaryLines = [
+            '## MCN Compatibility Report',
+            '',
+            '### Executive Summary',
+            `- ${counts.ready}/${totalFiles} files: Ready`,
+            `- ${counts.minor}/${totalFiles} files: Minor changes needed`,
+            `- ${counts.significant}/${totalFiles} files: Significant rewrite required`,
+            `- ${counts.notMigratable}/${totalFiles} files: Not migratable`,
+            '',
+            `Overall migration effort: **${effortLevels}**`,
+            '',
+            '---',
+        ];
+
+        const fileLines: string[] = [];
+        for (const result of results) {
+            const label = difficultyLabel[result.difficulty] ?? result.difficulty;
+            fileLines.push('', `### ${result.filename} — ${label}`, '');
+
+            if (result.ssjsBlocks.length > 0) {
+                fileLines.push('**SSJS Blocks:**', '');
+                for (const block of result.ssjsBlocks) {
+                    const icon = block.status === 'needs-conversion' ? '🔄' : '🚫';
+                    const statusLabel =
+                        block.status === 'needs-conversion' ? 'Needs conversion' : 'Not migratable';
+                    fileLines.push(
+                        `${icon} SSJS block ${block.index} (≈line ${block.lineApprox}): **${statusLabel}** — ${block.reason}`
+                    );
+                }
+                fileLines.push('');
+            }
+
+            if (result.ampFunctions.length > 0) {
+                fileLines.push('| Function | Line | Status | Reason |', '|---|---|---|---|');
+                for (const fn of result.ampFunctions) {
+                    const icon =
+                        fn.status === 'supported'
+                            ? '✅'
+                            : fn.status === 'needs-review'
+                              ? '⚠️'
+                              : '❌';
+                    const statusLabel =
+                        fn.status === 'supported'
+                            ? 'Supported'
+                            : fn.status === 'needs-review'
+                              ? 'Needs review'
+                              : 'Not supported';
+                    fileLines.push(
+                        `| ${fn.name} | ${fn.line} | ${icon} ${statusLabel} | ${fn.reason} |`
+                    );
+                }
+            } else if (result.ssjsBlocks.length === 0) {
+                fileLines.push('*No AMPscript functions or SSJS blocks found.*');
+            }
+
+            fileLines.push('', '---');
+        }
+
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: [...summaryLines, ...fileLines].join('\n'),
+                },
+            ],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: rewrite_for_mcn
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'rewrite_for_mcn',
+    'Deterministically rewrite AMPscript (and optionally SSJS) code for Marketing Cloud Next compatibility. ' +
+        'Handles: FormatDate(StringToDate(x)) simplification, .NET→Java format strings, ' +
+        'MCE-only function annotations, SSJS→AMPscript rule-based conversion. ' +
+        'Flags complex constructs as MANUAL_REWRITE_REQUIRED. ' +
+        'Use the rewrite_for_mcn PROMPT (not this tool) for AI-enhanced handling of MANUAL_REWRITE_REQUIRED sections.',
+    {
+        code: z.string().describe('The AMPscript or HTML code to rewrite for MCN.'),
+        context: z
+            .enum(['email', 'cloudpage', 'auto'])
+            .optional()
+            .default('auto')
+            .describe(
+                "Content context. Use 'cloudpage' to immediately flag as not migratable. Default 'auto' detects context."
+            ),
+    },
+    ({ code, context = 'auto' }) => {
+        // CloudPage detection
+        const isCloudPage =
+            context === 'cloudpage' ||
+            (context === 'auto' &&
+                /\b(CloudPagesURL|RequestParameter|QueryParameter)\s*\(/i.test(code));
+
+        if (isCloudPage) {
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: JSON.stringify({
+                            rewrittenCode: code,
+                            changes: [],
+                            nonMigratableItems: [
+                                {
+                                    line: 1,
+                                    code: 'CloudPage context detected',
+                                    reason: 'CloudPages (RequestParameter, QueryParameter, CloudPagesURL, Redirect) are not available in Marketing Cloud Next. This use case cannot be migrated.',
+                                },
+                            ],
+                            difficulty: 'not-migratable',
+                            summary: 'CloudPage context — not available in Marketing Cloud Next',
+                        }),
+                    },
+                ],
+            };
+        }
+
+        // Rewrite AMPscript portions
+        const ampResult = rewriteAmpForMcn(code, {
+            isMcnSupportedFn: isMcnSupported,
+            getMcnNotesFn: getMcnNotes,
+        });
+
+        let finalCode = ampResult.rewrittenCode;
+        const allChanges = [...ampResult.changes];
+        const allNonMigratable = [...ampResult.nonMigratableItems];
+
+        // Convert SSJS blocks to AMPscript
+        const ssjsPattern = /<script[^>]+runat=['"]?server['"]?[^>]*>[\s\S]*?<\/script>/gi;
+        finalCode = finalCode.replaceAll(ssjsPattern, (ssjsBlock: string) => {
+            if (!isSsjsBlockConvertible(ssjsBlock)) {
+                allNonMigratable.push({
+                    line: 0,
+                    code: ssjsBlock.slice(0, 100),
+                    reason: 'SSJS block contains non-migratable constructs',
+                });
+                return (
+                    ssjsBlock +
+                    '\n%%-- MANUAL_REWRITE_REQUIRED: Non-migratable SSJS block above --%% '
+                );
+            }
+            const ssjsResult = ssjsToAmpscript(ssjsBlock);
+            for (const c of ssjsResult.changes) {
+                allChanges.push({ line: c.line, type: 'rewritten', description: c.description });
+            }
+            for (const f of ssjsResult.flaggedSections) {
+                allNonMigratable.push({ line: f.line, code: f.code, reason: f.reason });
+            }
+            return ssjsResult.convertedCode;
+        });
+
+        // Reassess difficulty
+        const hasMigratable = allNonMigratable.length > 0;
+        const difficulty: 'ready' | 'minor' | 'significant' | 'not-migratable' =
+            hasMigratable && allNonMigratable.some((i) => i.reason.includes('not-migratable'))
+                ? 'not-migratable'
+                : ampResult.difficulty;
+
+        const result = {
+            rewrittenCode: finalCode,
+            changes: allChanges,
+            nonMigratableItems: allNonMigratable,
+            difficulty,
+            summary: ampResult.summary,
+        };
+
+        return {
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Prompt: rewrite_for_mcn
+// ---------------------------------------------------------------------------
+
+server.prompt(
+    'rewrite_for_mcn',
+    'Rewrite AMPscript/SSJS code to be compatible with Marketing Cloud Next. ' +
+        'Calls the rewrite_for_mcn tool first for deterministic rewrites, then applies ' +
+        'AI reasoning to handle any MANUAL_REWRITE_REQUIRED sections.',
+    {
+        code: z.string().describe('The AMPscript or HTML code to rewrite for MCN.'),
+        context: z
+            .enum(['email', 'cloudpage', 'auto'])
+            .optional()
+            .describe("Content context — use 'cloudpage' to immediately flag as not migratable."),
+    },
+    ({ code, context = 'auto' }) => ({
+        messages: [
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: [
+                        'You are an expert Salesforce Marketing Cloud developer helping migrate code to Marketing Cloud Next (MCN).',
+                        '',
+                        '## Instructions',
+                        '1. Call the `rewrite_for_mcn` **tool** with the code and context below.',
+                        '2. Review the `nonMigratableItems` in the result.',
+                        '3. For each item marked `MANUAL_REWRITE_REQUIRED`, attempt an AI-driven conversion:',
+                        '   - Complex loops → AMPscript FOR/NEXT blocks if possible',
+                        '   - SSJS try/catch → AMPscript RaiseError() with conditional guards',
+                        '   - Array methods (forEach, map, filter) → AMPscript FOR loops over RowSets',
+                        '   - JSON.parse/stringify → BuildRowsetFromJson() / row operations',
+                        '4. Produce a single final rewritten code block.',
+                        '5. Include a concise change log as a bulleted list.',
+                        '',
+                        '## MCN rules to enforce',
+                        '- AMPscript only — no SSJS blocks (`<script runat="server">`) in the final output.',
+                        '- FormatDate() must use Java SimpleDateFormat strings, not .NET strings.',
+                        '- FormatDate(StringToDate(x), fmt) must be simplified to FormatDate(x, fmt).',
+                        '- Lookup() must have an even number of search column/value pairs.',
+                        '- Functions not in the MCN catalog must be replaced or removed.',
+                        '- CloudPages context (RequestParameter, QueryParameter, CloudPagesURL) → cannot migrate; explain why.',
+                        '',
+                        `## Context: ${context}`,
+                        '',
+                        '## Code to rewrite',
+                        '```',
+                        code,
+                        '```',
+                    ].join('\n'),
+                },
+            },
+        ],
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Tool: convertSsjsToAmpscript
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'convertSsjsToAmpscript',
+    'Deterministically convert SSJS (Server-Side JavaScript) code to AMPscript using rule-based transformations. ' +
+        'Handles: Platform.Function.* → AMPscript equivalents, Platform.Variable.GetValue/SetValue → @variable, ' +
+        'Platform.Response.Write → OutputLine, var declarations → SET, if/else → IF/ELSE/ENDIF. ' +
+        'Flags JS-native constructs (try/catch, array methods, JSON, regex) as MANUAL_REWRITE_REQUIRED. ' +
+        'Use the convertSsjsToAmpscript PROMPT for AI-enhanced handling of flagged sections.',
+    {
+        code: z
+            .string()
+            .describe('The SSJS code to convert (may include <script runat="server"> tags).'),
+    },
+    ({ code }) => {
+        const result = ssjsToAmpscript(code);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(
+                        {
+                            convertedCode: result.convertedCode,
+                            changes: result.changes,
+                            flaggedSections: result.flaggedSections,
+                        },
+                        null,
+                        2
+                    ),
+                },
+            ],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Prompt: convertSsjsToAmpscript
+// ---------------------------------------------------------------------------
+
+server.prompt(
+    'convertSsjsToAmpscript',
+    'Convert SSJS (Server-Side JavaScript) code to equivalent AMPscript. ' +
+        'Calls the convertSsjsToAmpscript tool first for deterministic rule-based conversion, ' +
+        'then applies AI reasoning to handle any MANUAL_REWRITE_REQUIRED sections.',
+    {
+        code: z.string().describe('The SSJS code to convert to AMPscript.'),
+    },
+    ({ code }) => ({
+        messages: [
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: [
+                        'You are an expert Salesforce Marketing Cloud developer converting SSJS to AMPscript.',
+                        '',
+                        '## Instructions',
+                        '1. Call the `convertSsjsToAmpscript` **tool** with the code below to get a deterministic conversion.',
+                        '2. Review the `flaggedSections` in the result — these are constructs the tool could not convert automatically.',
+                        '3. For each flagged section, apply your expertise:',
+                        '   - SSJS try/catch → use RaiseError() and conditional guards in AMPscript',
+                        '   - Array .forEach/.map → AMPscript FOR @i = 1 TO RowCount(@rs) DO loops',
+                        '   - JSON.parse/stringify → use BuildRowsetFromJson() or Field() on RowSets',
+                        '   - HTTP calls → use HTTPGet() / HTTPPost() in AMPscript',
+                        '   - Complex string manipulation → AMPscript string functions (Concat, Replace, Substring, etc.)',
+                        '4. Produce a single final AMPscript code block.',
+                        '5. Add a short change log as a bulleted list.',
+                        '',
+                        '## AMPscript syntax reminders',
+                        '- Blocks: `%%[ ... ]%%` — statements: `SET @x = expr`',
+                        '- Variables: `@varName` (no declaration needed except VAR)',
+                        '- Functions: PascalCase, no Platform.Function. prefix',
+                        '- Conditions: `IF cond THEN ... ELSEIF cond THEN ... ELSE ... ENDIF`',
+                        '- Loops: `FOR @i = 1 TO @count DO ... NEXT @i`',
+                        '- Output: `%%=Output(@x)=%%` (inline) or `%%[ OutputLine(x) ]%%` (block)',
+                        '',
+                        '## SSJS code to convert',
+                        '```javascript',
+                        code,
+                        '```',
+                    ].join('\n'),
+                },
+            },
+        ],
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Tool: convertAmpscriptToSsjs
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'convertAmpscriptToSsjs',
+    'Deterministically convert AMPscript code to equivalent SSJS using rule-based transformations. ' +
+        'Handles: SET @x → var x, IF/ELSEIF/ELSE/ENDIF → JS conditionals, FOR/NEXT → for loops, ' +
+        'Output/OutputLine → Platform.Response.Write, AMPscript functions → Platform.Function equivalents. ' +
+        'Flags AMPscript-only constructs (email-specific functions, personalization strings) as MANUAL_REWRITE_REQUIRED. ' +
+        'Use the convertAmpscriptToSsjs PROMPT for AI-enhanced handling of flagged sections.',
+    {
+        code: z.string().describe('The AMPscript code to convert to SSJS.'),
+    },
+    ({ code }) => {
+        const result = ampscriptToSsjs(code);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(
+                        {
+                            convertedCode: result.convertedCode,
+                            changes: result.changes,
+                            flaggedSections: result.flaggedSections,
+                        },
+                        null,
+                        2
+                    ),
                 },
             ],
         };
