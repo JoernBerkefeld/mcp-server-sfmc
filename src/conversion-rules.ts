@@ -30,115 +30,84 @@ export interface ConversionResult {
 }
 
 // ---------------------------------------------------------------------------
-// Platform.Function.X → AMPscript function name (lowercase key)
+// Dynamic Platform.Function ↔ AMPscript maps (built from ssjs-data at load time)
 // ---------------------------------------------------------------------------
+
+import { PLATFORM_FUNCTIONS } from 'ssjs-data';
 
 /**
  * Maps a Platform.Function.X name (lowercase) to the equivalent AMPscript
- * canonical function name. Only functions with a direct 1:1 equivalent are
- * included.
+ * canonical function name. Built at module load time from ssjs-data's
+ * ampscriptEquivalent field — always in sync with the installed ssjs-data version.
+ * Only functions with a direct 1:1 equivalent are included.
  */
-export const PLATFORM_FUNCTION_TO_AMP: Readonly<Record<string, string>> = {
-    lookup: 'Lookup',
-    lookuprows: 'LookupRows',
-    lookuporderedrows: 'LookupOrderedRows',
-    lookuporderedrowscs: 'LookupOrderedRowsCS',
-    insertde: 'InsertDE',
-    updatede: 'UpdateDE',
-    upsertde: 'UpsertDE',
-    deletede: 'DeleteDE',
-    rowcount: 'RowCount',
-    contentblockbyid: 'ContentBlockById',
-    contentblockbyname: 'ContentBlockByName',
-    contentblockbykey: 'ContentBlockByKey',
-    now: 'Now',
-    dateadd: 'DateAdd',
-    datediff: 'DateDiff',
-    dateparse: 'DateParse',
-    formatdate: 'FormatDate',
-    stringtodate: 'StringToDate',
-    concat: 'Concat',
-    substring: 'Substring',
-    trim: 'Trim',
-    lowercase: 'Lowercase',
-    uppercase: 'Uppercase',
-    propercase: 'ProperCase',
-    replace: 'Replace',
-    replacelist: 'ReplaceList',
-    indexof: 'IndexOf',
-    length: 'Length',
-    add: 'Add',
-    subtract: 'Subtract',
-    multiply: 'Multiply',
-    divide: 'Divide',
-    mod: 'Mod',
-    iif: 'Iif',
-    empty: 'Empty',
-    isnull: 'IsNull',
-    format: 'Format',
-    formatcurrency: 'FormatCurrency',
-    formatnumber: 'FormatNumber',
-    random: 'Random',
-    guid: 'GUID',
-    v: 'v',
-    output: 'Output',
-    outputline: 'OutputLine',
-    raiseerror: 'RaiseError',
-    httpget: 'HTTPGet',
-    httppost: 'HTTPPost',
-    httpgetwithcacheability: 'HTTPGetWithCacheability',
-};
+export const PLATFORM_FUNCTION_TO_AMP: Readonly<Record<string, string>> = Object.fromEntries(
+    PLATFORM_FUNCTIONS.filter((f) => f.ampscriptEquivalent != null).map((f) => [
+        f.name.toLowerCase(),
 
-// ---------------------------------------------------------------------------
-// AMPscript function name → Platform.Function.X SSJS name (lowercase key)
-// ---------------------------------------------------------------------------
+        f.ampscriptEquivalent!,
+    ])
+);
 
 /**
  * Maps an AMPscript function name (lowercase) to its SSJS Platform.Function
- * equivalent name (the part after "Platform.Function.").
+ * equivalent name (the part after "Platform.Function."). Inverted from
+ * PLATFORM_FUNCTION_TO_AMP at module load time.
  */
-export const AMP_TO_PLATFORM_FUNCTION: Readonly<Record<string, string>> = {
-    lookup: 'Lookup',
-    lookuprows: 'LookupRows',
-    lookuporderedrows: 'LookupOrderedRows',
-    lookuporderedrowscs: 'LookupOrderedRowsCS',
-    insertde: 'InsertDE',
-    updatede: 'UpdateDE',
-    upsertde: 'UpsertDE',
-    deletede: 'DeleteDE',
-    rowcount: 'RowCount',
-    contentblockbyid: 'ContentBlockById',
-    contentblockbyname: 'ContentBlockByName',
-    contentblockbykey: 'ContentBlockByKey',
-    now: 'Now',
-    dateadd: 'DateAdd',
-    datediff: 'DateDiff',
-    dateparse: 'DateParse',
-    formatdate: 'FormatDate',
-    stringtodate: 'StringToDate',
-    concat: 'Concat',
-    substring: 'Substring',
-    trim: 'Trim',
-    lowercase: 'Lowercase',
-    uppercase: 'Uppercase',
-    propercase: 'ProperCase',
-    replace: 'Replace',
-    replacelist: 'ReplaceList',
-    indexof: 'IndexOf',
-    length: 'Length',
-    add: 'Add',
-    subtract: 'Subtract',
-    multiply: 'Multiply',
-    divide: 'Divide',
-    mod: 'Mod',
-    iif: 'Iif',
-    empty: 'Empty',
-    isnull: 'IsNull',
-    format: 'Format',
-    formatcurrency: 'FormatCurrency',
-    formatnumber: 'FormatNumber',
-    random: 'Random',
-    guid: 'GUID',
+export const AMP_TO_PLATFORM_FUNCTION: Readonly<Record<string, string>> = Object.fromEntries(
+    PLATFORM_FUNCTIONS.filter((f) => f.ampscriptEquivalent != null).map((f) => [
+        f.ampscriptEquivalent!.toLowerCase(),
+        f.name,
+    ])
+);
+
+/**
+ * Set of SSJS Platform.Function names (lowercase) that have no AMPscript
+ * equivalent (SSJS-only). These must be flagged MANUAL_REWRITE_REQUIRED when
+ * converting SSJS → AMPscript.
+ */
+const SSJS_ONLY_FUNCTIONS: ReadonlySet<string> = new Set(
+    PLATFORM_FUNCTIONS.filter((f) => f.ampscriptEquivalent === null).map((f) =>
+        f.name.toLowerCase()
+    )
+);
+
+// ---------------------------------------------------------------------------
+// AMP_NATIVE_JS_HINTS: AMPscript-only functions with clean native JS rewrites
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps an AMPscript function name (lowercase) to a native JavaScript rewrite
+ * hint comment. Checked BEFORE the TreatAsContent polyfill fallback in
+ * AMPscript → SSJS conversion. All hints are ES3-safe (no ES5+ methods).
+ *
+ * NOTE: Trim is deliberately absent — it maps to Platform.Function.Trim via
+ * the dynamic map above. String.prototype.trim() is ES5 and unavailable in
+ * SFMC SSJS.
+ */
+export const AMP_NATIVE_JS_HINTS: Readonly<Record<string, string>> = {
+    // String operations
+    concat: '/* use string concatenation: a + b */',
+    substring: '.substring(start, start + length)',
+    lowercase: '.toLowerCase()',
+    uppercase: '.toUpperCase()',
+    indexof: '.indexOf(searchStr)',
+    length: '.length',
+    replace: '.replace(search, replacement)',
+    // Math
+    add: '/* use: a + b */',
+    subtract: '/* use: a - b */',
+    multiply: '/* use: a * b */',
+    divide: '/* use: a / b */',
+    mod: '/* use: a % b */',
+    random: 'Math.floor(Math.random() * n)',
+    // Utility
+    iif: '/* use ternary: condition ? trueValue : falseValue */',
+    empty: '/* use: !value */',
+    isnull: '/* use: value === null */',
+    // Output (also handled explicitly in ssjsToAmpscript)
+    output: 'Platform.Response.Write(expr)',
+    outputline: 'Platform.Response.Write(expr)',
 };
 
 // ---------------------------------------------------------------------------
@@ -341,7 +310,24 @@ export function ssjsToAmpscript(code: string): ConversionResult {
 
         // Platform.Function.X(args) → X(args) using known function map
         line = line.replaceAll(/Platform\.Function\.(\w+)\s*\(/gi, (_, fnName: string) => {
-            const ampName = PLATFORM_FUNCTION_TO_AMP[fnName.toLowerCase()] ?? fnName;
+            const key = fnName.toLowerCase();
+            if (SSJS_ONLY_FUNCTIONS.has(key)) {
+                flaggedSections.push({
+                    line: lineNum,
+                    code: `Platform.Function.${fnName}(...)`,
+                    reason: `Platform.Function.${fnName} has no AMPscript equivalent`,
+                });
+                return `/* MANUAL_REWRITE_REQUIRED: Platform.Function.${fnName} has no AMPscript equivalent */ ${fnName}(`;
+            }
+            const ampName = PLATFORM_FUNCTION_TO_AMP[key];
+            if (!ampName) {
+                flaggedSections.push({
+                    line: lineNum,
+                    code: `Platform.Function.${fnName}(...)`,
+                    reason: `Platform.Function.${fnName} not found in ssjs-data catalog`,
+                });
+                return `/* MANUAL_REWRITE_REQUIRED: unknown Platform.Function.${fnName} */ ${fnName}(`;
+            }
             changes.push({
                 line: lineNum,
                 description: `Platform.Function.${fnName} → ${ampName}`,
@@ -460,6 +446,7 @@ export function ampscriptToSsjs(code: string): ConversionResult {
     const changes: ChangeEntry[] = [];
     const flaggedSections: FlaggedSection[] = [];
     const outputLines: string[] = ['<script runat="server">', 'Platform.Load("Core", "1.1.5");'];
+    const polyfillUsed = { value: false };
 
     // Normalize: combine multi-line %%[ ... ]%% blocks into single pseudo-lines
     // then process line by line
@@ -494,7 +481,8 @@ export function ampscriptToSsjs(code: string): ConversionResult {
         if (inlineFnMatch) {
             const fnName = inlineFnMatch[1];
             const args = inlineFnMatch[2]?.trim() ?? '';
-            const ssName = AMP_TO_PLATFORM_FUNCTION[fnName.toLowerCase()];
+            const key = fnName.toLowerCase();
+            const ssName = AMP_TO_PLATFORM_FUNCTION[key];
             const argsConverted = stripAmpVars(args);
             if (ssName) {
                 changes.push({
@@ -504,14 +492,32 @@ export function ampscriptToSsjs(code: string): ConversionResult {
                 outputLines.push(
                     `Platform.Response.Write(Platform.Function.${ssName}(${argsConverted}));`
                 );
-            } else {
-                // Unknown function — pass through as comment for AI
+            } else if (AMP_NATIVE_JS_HINTS[key]) {
+                changes.push({
+                    line: lineNum,
+                    description: `%%=${fnName}(...)=%% → native JS hint`,
+                });
+                outputLines.push(
+                    `Platform.Response.Write(${AMP_NATIVE_JS_HINTS[key]} /* AMPscript: ${fnName}(${args}) */);`
+                );
+            } else if (CLOUDPAGES_ONLY_FUNCTIONS.has(key)) {
+                // CloudPages-only function
                 outputLines.push(`/* MANUAL_REWRITE_REQUIRED: %%=${fnName}(${args})=%% */`);
                 flaggedSections.push({
                     line: lineNum,
                     code: trimmed,
-                    reason: `Unknown AMPscript function '${fnName}' — no SSJS equivalent in catalog`,
+                    reason: `AMPscript function '${fnName}' is CloudPages-only — no SSJS equivalent`,
                 });
+            } else {
+                // AMP-only function with no native hint → polyfill
+                polyfillUsed.value = true;
+                changes.push({
+                    line: lineNum,
+                    description: `%%=${fnName}(...)=%% → _ampScript polyfill`,
+                });
+                outputLines.push(
+                    `Platform.Response.Write(_ampScript('${trimmed.replaceAll("'", String.raw`\'`)}'));`
+                );
             }
             continue;
         }
@@ -526,7 +532,8 @@ export function ampscriptToSsjs(code: string): ConversionResult {
                     stmt.trim(),
                     lineNum,
                     changes,
-                    flaggedSections
+                    flaggedSections,
+                    polyfillUsed
                 );
                 if (converted !== null) {
                     outputLines.push(converted);
@@ -537,7 +544,28 @@ export function ampscriptToSsjs(code: string): ConversionResult {
 
         // Bare AMPscript statement (already stripped of delimiters from normalizeAmpscriptBlocks)
         if (/^(SET|VAR|IF|ELSEIF|ELSE|ENDIF|FOR|NEXT|OUTPUT|OUTPUTLINE)\b/i.test(trimmed)) {
-            const converted = convertAmpStatement(trimmed, lineNum, changes, flaggedSections);
+            const converted = convertAmpStatement(
+                trimmed,
+                lineNum,
+                changes,
+                flaggedSections,
+                polyfillUsed
+            );
+            if (converted !== null) {
+                outputLines.push(converted);
+            }
+            continue;
+        }
+
+        // Bare function call or other AMPscript statement inside a normalized block
+        if (/^\w+\s*\(/.test(trimmed)) {
+            const converted = convertAmpStatement(
+                trimmed,
+                lineNum,
+                changes,
+                flaggedSections,
+                polyfillUsed
+            );
             if (converted !== null) {
                 outputLines.push(converted);
             }
@@ -548,6 +576,22 @@ export function ampscriptToSsjs(code: string): ConversionResult {
         if (trimmed) {
             outputLines.push(`/* HTML content: ${trimmed.slice(0, 80)} */`);
         }
+    }
+
+    // If any polyfill calls were emitted, insert the _ampScript helper after Platform.Load
+    if (polyfillUsed.value) {
+        // splice in right after the Platform.Load line (index 1)
+        outputLines.splice(
+            2,
+            0,
+
+            '',
+            '// Polyfill: executes AMPscript and returns result via @_amp_response',
+            'function _ampScript(code) {',
+            "    Platform.Function.TreatAsContent('%%[ SET @_amp_response = ' + code + ' ]%%');",
+            "    return Platform.Variable.GetValue('@_amp_response');",
+            '}'
+        );
     }
 
     outputLines.push('</script>');
@@ -584,13 +628,16 @@ function normalizeAmpscriptBlocks(code: string): string {
  * @param lineNum - Source line number for change tracking.
  * @param changes - Mutable changes array.
  * @param flaggedSections - Mutable flagged sections array.
+ * @param polyfillUsed - Mutable flag set to true when _ampScript polyfill is emitted.
+ * @param polyfillUsed.value
  * @returns {string | null} SSJS statement string, or null to skip.
  */
 function convertAmpStatement(
     stmt: string,
     lineNum: number,
     changes: ChangeEntry[],
-    flaggedSections: FlaggedSection[]
+    flaggedSections: FlaggedSection[],
+    polyfillUsed: { value: boolean }
 ): string | null {
     if (!stmt) return null;
 
@@ -600,7 +647,24 @@ function convertAmpStatement(
     const setMatch = /^SET\s+@(\w+)\s*=\s*(.+)$/i.exec(stmt);
     if (setMatch) {
         const [, varName, expr] = setMatch;
-        const ssExpr = convertAmpExpr(expr.trim());
+        const exprTrimmed = expr.trim();
+        // Check if the expression is a single AMP-only function call with no Platform.Function equivalent
+        // and no native JS hint — if so, emit _ampScript polyfill rather than a broken expression.
+        const singleFnMatch = /^(\w+)\s*\(/.exec(exprTrimmed);
+        if (singleFnMatch) {
+            const key = singleFnMatch[1].toLowerCase();
+            const hasSsjsEquiv = AMP_TO_PLATFORM_FUNCTION[key] !== undefined;
+            const hasNativeHint = AMP_NATIVE_JS_HINTS[key] !== undefined;
+            if (!hasSsjsEquiv && !hasNativeHint && !CLOUDPAGES_ONLY_FUNCTIONS.has(key)) {
+                polyfillUsed.value = true;
+                changes.push({
+                    line: lineNum,
+                    description: `SET @${varName} = ${singleFnMatch[1]}(...) → _ampScript polyfill`,
+                });
+                return `var ${varName} = _ampScript('${exprTrimmed.replaceAll("'", String.raw`\'`)}');`;
+            }
+        }
+        const ssExpr = convertAmpExpr(exprTrimmed);
         changes.push({
             line: lineNum,
             description: `SET @${varName} = ... → var ${varName} = ...`,
@@ -678,7 +742,8 @@ function convertAmpStatement(
     const fnCallMatch = /^(\w+)\s*\((.*)?\)$/i.exec(stmt);
     if (fnCallMatch) {
         const [, fnName, args] = fnCallMatch;
-        const ssName = AMP_TO_PLATFORM_FUNCTION[fnName.toLowerCase()];
+        const key = fnName.toLowerCase();
+        const ssName = AMP_TO_PLATFORM_FUNCTION[key];
         if (ssName) {
             const argsConverted = args ? convertAmpExpr(args.trim()) : '';
             changes.push({
@@ -687,9 +752,37 @@ function convertAmpStatement(
             });
             return `Platform.Function.${ssName}(${argsConverted});`;
         }
+
+        // CloudPages-only functions have no SSJS/MCN equivalent
+        if (CLOUDPAGES_ONLY_FUNCTIONS.has(key)) {
+            flaggedSections.push({
+                line: lineNum,
+                code: stmt,
+                reason: 'CloudPages-specific function — not available in SSJS/MCN context',
+            });
+            return `/* MANUAL_REWRITE_REQUIRED: ${stmt} */`;
+        }
+
+        // Check native JS hints for AMP-only functions
+        const hint = AMP_NATIVE_JS_HINTS[key];
+        if (hint) {
+            changes.push({
+                line: lineNum,
+                description: `${fnName}(…) → native JS equivalent`,
+            });
+            return `${hint} /* AMPscript: ${stmt} */`;
+        }
+
+        // AMP-only function with no native hint → TreatAsContent polyfill
+        polyfillUsed.value = true;
+        changes.push({
+            line: lineNum,
+            description: `${fnName}(…) → _ampScript polyfill (no direct SSJS equivalent)`,
+        });
+        return `_ampScript('${stmt.replaceAll("'", String.raw`\'`)}');`;
     }
 
-    // Check for AMPscript-only constructs that can't be converted
+    // Check for AMPscript-only constructs that can't be converted (catch-all for non-standard usage)
     if (/\bCLOUDPAGESURL\b|\bREQUESTPARAMETER\b|\bQUERYPARAMETER\b|\bREDIRECT\b/i.test(stmt)) {
         flaggedSections.push({
             line: lineNum,
@@ -720,10 +813,18 @@ function convertAmpStatement(
  * @returns {string} SSJS expression string.
  */
 function convertAmpExpr(expr: string): string {
-    // Replace known AMPscript function calls with Platform.Function.X equivalents
+    // Replace known AMPscript function calls with Platform.Function.X equivalents;
+    // emit a hint comment for native-hint functions; leave others with a MANUAL_REWRITE comment.
+    // Note: AMP-only functions used in a SET assignment are handled at the statement level
+    // (convertAmpStatement SET handler) which emits _ampScript(...) for the whole expression.
     let result = expr.replaceAll(/\b(\w+)\s*\(/g, (match: string, fnName: string) => {
-        const ssName = AMP_TO_PLATFORM_FUNCTION[fnName.toLowerCase()];
-        return ssName ? `Platform.Function.${ssName}(` : match;
+        const key = fnName.toLowerCase();
+        const ssName = AMP_TO_PLATFORM_FUNCTION[key];
+        if (ssName) return `Platform.Function.${ssName}(`;
+        const hint = AMP_NATIVE_JS_HINTS[key];
+        if (hint) return `${hint} /* ${fnName}( */`;
+        // Unknown function in expression context — annotate
+        return `/* MANUAL_REWRITE_REQUIRED: no SSJS equivalent for ${fnName} */ ${fnName}(`;
     });
 
     // Strip @ from variable references

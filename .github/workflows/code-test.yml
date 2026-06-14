@@ -25,4 +25,8 @@ jobs:
 
             - run: npm ci --no-workspaces
             - run: npm run lint
+            - name: Validate conversion maps (requires ampscript-data and ssjs-data sibling repos)
+              run: node scripts/validate-conversion-maps.mjs
+              working-directory: ..
+              continue-on-error: true
             - run: npm test
