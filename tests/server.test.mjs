@@ -27,6 +27,7 @@ import { clearMcnHelpCache, getMcnHelpStats, searchMcnHelp } from '../dist/mcn-h
 import {
     PLATFORM_FUNCTION_TO_AMP,
     AMP_TO_PLATFORM_FUNCTION,
+    AMP_NATIVE_JS_HINTS,
     DOTNET_TO_JAVA_FORMAT_REPLACEMENTS,
     DOTNET_STANDARD_SHORTHANDS,
     NON_MIGRATABLE_SSJS_PATTERNS,
@@ -35,6 +36,7 @@ import {
     rewriteAmpForMcn,
     isSsjsBlockConvertible,
 } from '../dist/conversion-rules.js';
+import { PLATFORM_FUNCTIONS } from 'ssjs-data';
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(testsDir, '..');
@@ -700,6 +702,23 @@ describe('convertSsjsToAmpscript tool logic', () => {
         assert.ok(Array.isArray(result.changes));
         assert.ok(Array.isArray(result.flaggedSections));
     });
+
+    test('Platform.Function.ParseJSON → MANUAL_REWRITE_REQUIRED (SSJS-only function)', () => {
+        const result = ssjsToAmpscript('var data = Platform.Function.ParseJSON(jsonStr);');
+        assert.ok(
+            result.convertedCode.includes('MANUAL_REWRITE_REQUIRED') ||
+                result.flaggedSections.length > 0,
+            `ParseJSON should be flagged as MANUAL_REWRITE_REQUIRED, got: ${result.convertedCode}`
+        );
+    });
+
+    test('Platform.Function.UrlEncode → URLEncode (casing alias)', () => {
+        const result = ssjsToAmpscript('Platform.Function.UrlEncode(str);');
+        assert.ok(
+            result.convertedCode.includes('URLEncode('),
+            `expected URLEncode(), got: ${result.convertedCode}`
+        );
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -760,6 +779,23 @@ describe('convertAmpscriptToSsjs tool logic', () => {
         assert.ok(Array.isArray(result.changes));
         assert.ok(Array.isArray(result.flaggedSections));
     });
+
+    test('Concat("a","b") → native JS hint comment, NOT Platform.Function.Concat', () => {
+        const result = ampscriptToSsjs('%%[ SET @x = Concat("a", "b") ]%%');
+        assert.ok(
+            !result.convertedCode.includes('Platform.Function.Concat'),
+            `Concat should NOT produce Platform.Function.Concat, got: ${result.convertedCode}`
+        );
+    });
+
+    test('DateAdd(@d, 1, "D") → _ampScript polyfill (TreatAsContent fallback)', () => {
+        const result = ampscriptToSsjs('%%[ DateAdd(@d, 1, "D") ]%%');
+        assert.ok(
+            result.convertedCode.includes('_ampScript') ||
+                result.convertedCode.includes('TreatAsContent'),
+            `DateAdd should use _ampScript polyfill, got: ${result.convertedCode}`
+        );
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -767,50 +803,155 @@ describe('convertAmpscriptToSsjs tool logic', () => {
 // ---------------------------------------------------------------------------
 
 describe('conversion-rules mapping tables', () => {
-    test('PLATFORM_FUNCTION_TO_AMP: spot-check 10+ entries', () => {
-        const expected = [
+    test('PLATFORM_FUNCTION_TO_AMP: data-driven — exactly the entries with non-null ampscriptEquivalent', () => {
+        const expected = Object.fromEntries(
+            PLATFORM_FUNCTIONS.filter((f) => f.ampscriptEquivalent != null).map((f) => [
+                f.name.toLowerCase(),
+                f.ampscriptEquivalent,
+            ])
+        );
+        assert.deepEqual(
+            PLATFORM_FUNCTION_TO_AMP,
+            expected,
+            'PLATFORM_FUNCTION_TO_AMP must match ssjs-data ampscriptEquivalent entries exactly'
+        );
+    });
+
+    test('AMP_TO_PLATFORM_FUNCTION: data-driven — exact inverse of PLATFORM_FUNCTION_TO_AMP', () => {
+        const expected = Object.fromEntries(
+            PLATFORM_FUNCTIONS.filter((f) => f.ampscriptEquivalent != null).map((f) => [
+                f.ampscriptEquivalent.toLowerCase(),
+                f.name,
+            ])
+        );
+        assert.deepEqual(
+            AMP_TO_PLATFORM_FUNCTION,
+            expected,
+            'AMP_TO_PLATFORM_FUNCTION must be the exact inverse of PLATFORM_FUNCTION_TO_AMP'
+        );
+    });
+
+    test('Stale keys absent — AMP-only functions must NOT be in either map', () => {
+        const staleKeys = ['concat', 'dateparse', 'formatdate', 'iif', 'dateadd', 'trim'];
+        for (const key of staleKeys) {
+            assert.equal(
+                PLATFORM_FUNCTION_TO_AMP[key],
+                undefined,
+                `PLATFORM_FUNCTION_TO_AMP['${key}'] should be absent (AMP-only function, not a Platform.Function)`
+            );
+            assert.equal(
+                AMP_TO_PLATFORM_FUNCTION[key],
+                undefined,
+                `AMP_TO_PLATFORM_FUNCTION['${key}'] should be absent (AMP-only function, not a Platform.Function)`
+            );
+        }
+    });
+
+    test('Casing alias: UrlEncode (SSJS) → URLEncode (AMP)', () => {
+        assert.equal(
+            PLATFORM_FUNCTION_TO_AMP['urlencode'],
+            'URLEncode',
+            "PLATFORM_FUNCTION_TO_AMP['urlencode'] should be 'URLEncode'"
+        );
+        assert.equal(
+            AMP_TO_PLATFORM_FUNCTION['urlencode'],
+            'UrlEncode',
+            "AMP_TO_PLATFORM_FUNCTION['urlencode'] should be 'UrlEncode'"
+        );
+    });
+
+    test('True 1:1 pairs present in both maps', () => {
+        const pairs = [
             ['lookup', 'Lookup'],
             ['lookuprows', 'LookupRows'],
             ['insertde', 'InsertDE'],
             ['updatede', 'UpdateDE'],
             ['upsertde', 'UpsertDE'],
             ['deletede', 'DeleteDE'],
-            ['concat', 'Concat'],
-            ['trim', 'Trim'],
-            ['formatdate', 'FormatDate'],
             ['now', 'Now'],
-            ['dateadd', 'DateAdd'],
+            ['guid', 'GUID'],
+            ['raiseerror', 'RaiseError'],
+            ['httpget', 'HTTPGet'],
+            ['httppost', 'HTTPPost'],
         ];
-        for (const [key, value] of expected) {
+        for (const [key, ampName] of pairs) {
             assert.equal(
                 PLATFORM_FUNCTION_TO_AMP[key],
-                value,
-                `PLATFORM_FUNCTION_TO_AMP['${key}'] should be '${value}'`
+                ampName,
+                `PLATFORM_FUNCTION_TO_AMP['${key}'] should be '${ampName}'`
+            );
+            assert.equal(
+                AMP_TO_PLATFORM_FUNCTION[key],
+                PLATFORM_FUNCTIONS.find((f) => f.name.toLowerCase() === key)?.name,
+                `AMP_TO_PLATFORM_FUNCTION['${key}'] should map back to SSJS name`
             );
         }
     });
 
-    test('AMP_TO_PLATFORM_FUNCTION: spot-check 10+ entries', () => {
-        const expected = [
-            ['lookup', 'Lookup'],
-            ['lookuprows', 'LookupRows'],
-            ['insertde', 'InsertDE'],
-            ['updatede', 'UpdateDE'],
-            ['concat', 'Concat'],
-            ['trim', 'Trim'],
-            ['formatdate', 'FormatDate'],
-            ['now', 'Now'],
-            ['dateadd', 'DateAdd'],
-            ['lowercase', 'Lowercase'],
-            ['uppercase', 'Uppercase'],
+    test('SSJS-only functions absent from both maps', () => {
+        const ssjsOnly = [
+            'parsejson',
+            'stringify',
+            'invokeconfigure',
+            'invokeextract',
+            'invokeschedule',
         ];
-        for (const [key, value] of expected) {
+        for (const key of ssjsOnly) {
             assert.equal(
-                AMP_TO_PLATFORM_FUNCTION[key],
-                value,
-                `AMP_TO_PLATFORM_FUNCTION['${key}'] should be '${value}'`
+                PLATFORM_FUNCTION_TO_AMP[key],
+                undefined,
+                `PLATFORM_FUNCTION_TO_AMP['${key}'] should be absent (SSJS-only)`
             );
         }
+    });
+
+    test('AMP_NATIVE_JS_HINTS: contains expected AMP-only function hints', () => {
+        const expectedHints = [
+            'concat',
+            'lowercase',
+            'uppercase',
+            'indexof',
+            'length',
+            'replace',
+            'add',
+            'subtract',
+            'multiply',
+            'divide',
+            'mod',
+            'iif',
+            'empty',
+            'isnull',
+        ];
+        for (const key of expectedHints) {
+            assert.ok(
+                AMP_NATIVE_JS_HINTS[key] !== undefined,
+                `AMP_NATIVE_JS_HINTS['${key}'] should be defined`
+            );
+        }
+    });
+
+    test('AMP_NATIVE_JS_HINTS: Trim must NOT use .trim() (ES5 unavailable in SFMC SSJS)', () => {
+        assert.equal(
+            AMP_NATIVE_JS_HINTS['trim'],
+            undefined,
+            'Trim must not appear in AMP_NATIVE_JS_HINTS (.trim() is unavailable in SFMC SSJS)'
+        );
+    });
+
+    test('Trim(@x) → _ampScript polyfill (no Platform.Function.Trim, no native .trim())', () => {
+        const result = ampscriptToSsjs('%%[ SET @x = Trim(@y) ]%%');
+        assert.ok(
+            result.convertedCode.includes('_ampScript'),
+            `Trim should use _ampScript polyfill, got: ${result.convertedCode}`
+        );
+        assert.ok(
+            !result.convertedCode.includes('Platform.Function.Trim'),
+            `Trim must NOT map to Platform.Function.Trim, got: ${result.convertedCode}`
+        );
+        assert.ok(
+            !result.convertedCode.includes('.trim()'),
+            `Trim must NOT use .trim(), got: ${result.convertedCode}`
+        );
     });
 
     test('DOTNET_TO_JAVA_FORMAT_REPLACEMENTS: tt → a', () => {

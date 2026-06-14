@@ -135,7 +135,8 @@ function formatDiagnostics(diagnostics: ReturnType<typeof validateAmpscript>): s
         .map((d) => {
             const sev = d.severity === 1 ? 'ERROR' : d.severity === 2 ? 'WARNING' : 'INFO';
             const loc = `line ${d.range.start.line + 1}, col ${d.range.start.character + 1}`;
-            return `[${sev}] ${loc}: ${d.message}`;
+            const message = typeof d.message === 'string' ? d.message : d.message.value;
+            return `[${sev}] ${loc}: ${message}`;
         })
         .join('\n');
 }
@@ -519,7 +520,8 @@ server.tool(
         for (const d of diagnostics) {
             const sev = d.severity === 1 ? '🔴 ERROR' : d.severity === 2 ? '🟡 WARNING' : '🔵 INFO';
             const origLine = lineMap[d.range.start.line] ?? d.range.start.line + 1;
-            output.push(`${sev} (diff line ${origLine}): ${d.message}`);
+            const message = typeof d.message === 'string' ? d.message : d.message.value;
+            output.push(`${sev} (diff line ${origLine}): ${message}`);
         }
 
         return { content: [{ type: 'text', text: output.join('\n') }] };
@@ -566,10 +568,13 @@ server.tool(
 
         for (const d of diagnostics) {
             const lineText = lines[d.range.start.line] ?? '';
+            // Diagnostic.message widened to `string | MarkupContent` in newer LSP types; the
+            // SFMC language service only emits plain strings, so unwrap MarkupContent to its value.
+            const message = typeof d.message === 'string' ? d.message : d.message.value;
             suggestions.push(
-                `Line ${d.range.start.line + 1}: ${d.message}\n` +
+                `Line ${d.range.start.line + 1}: ${message}\n` +
                     `  Code: ${lineText.trim()}\n` +
-                    `  Fix: ${getFixSuggestion(d.message, lineText, detectedLang)}`
+                    `  Fix: ${getFixSuggestion(message, lineText, detectedLang)}`
             );
         }
 
@@ -2094,10 +2099,48 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Tool: get_server_version
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'get_server_version',
+    'Return the running mcp-server-sfmc version and the size of the bundled Salesforce ' +
+        'Marketing Cloud help datasets (MCE and MCN). Use this to confirm which server build ' +
+        'and documentation bundle are loaded.',
+    {},
+    () => {
+        const mce = getMceHelpStats();
+        const mcn = getMcnHelpStats();
+        const mceFileCount = new Set(getChunks().map((c) => c.relativePath)).size;
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(
+                        {
+                            name: 'mcp-server-sfmc',
+                            version: pkg.version,
+                            mceHelp: { chunkCount: mce.chunkCount, fileCount: mceFileCount },
+                            mcnHelp: { chunkCount: mcn.chunkCount, fileCount: mcn.fileCount },
+                        },
+                        null,
+                        2
+                    ),
+                },
+            ],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+    if (process.argv.includes('--version') || process.argv.includes('-v')) {
+        process.stdout.write(pkg.version + '\n');
+        return;
+    }
     const transport = new StdioServerTransport();
     await server.connect(transport);
     process.stderr.write('mcp-server-sfmc running on stdio\n');
