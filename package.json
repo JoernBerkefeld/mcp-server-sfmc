@@ -1,6 +1,6 @@
 {
     "name": "mcp-server-sfmc",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "mcpName": "io.github.JoernBerkefeld/mcp-server-sfmc",
     "description": "SFMC AMPscript/SSJS/GTL tools + searchable MCE and MCN developer docs, with full MCN platform support.",
     "author": "JÃƒÂ¶rn Berkefeld",
@@ -55,6 +55,7 @@
         "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
         "lint": "eslint .",
         "lint:fix": "eslint --fix .",
+        "version": "node -e \"const fs=require('fs'),p=require('./package.json'),s=JSON.parse(fs.readFileSync('server.json','utf8'));s.version=p.version;s.packages[0].version=p.version;fs.writeFileSync('server.json',JSON.stringify(s,null,4)+'\\n','utf8');\" && git add server.json",
         "prepare": "husky || true",
         "format": "prettier --write .",
         "format:check": "prettier --check ."
