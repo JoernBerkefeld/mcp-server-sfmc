@@ -24,12 +24,12 @@ For **other editors**, or if you prefer explicit configuration, use the `npx` or
 
 You **do not** have to install the VS Code extension. Pick one way to run the server:
 
-| Approach | When to use it |
-|---|---|
-| **`npx` (no install)** | Default in the examples below. Runs the latest published version from npm on demand; first run may download the package. **Requires Node.js and npm** (which provides `npx`). |
-| **`npm install -g mcp-server-sfmc`** | Same CLI as `npx`, but the package stays on disk so **startup is faster** and you can set `"command": "mcp-server-sfmc"` with empty `args` in your MCP config. |
-| **`npm install mcp-server-sfmc` in a project** | Keeps a **pinned version** in that folder's `node_modules` — point your MCP config at `npx mcp-server-sfmc` with `cwd` set to the project, or run `./node_modules/.bin/mcp-server-sfmc` directly. |
-| **`sfmc-review-diff` (bundled CLI)** | For **CI**: spawns this MCP server, calls `review_change` on a unified diff (stdin or file), exits non-zero on `ERROR` by default. Install the package in the job, then e.g. `git diff base...HEAD \| npx sfmc-review-diff`. |
+| Approach                                       | When to use it                                                                                                                                                                                                               |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`npx` (no install)**                         | Default in the examples below. Runs the latest published version from npm on demand; first run may download the package. **Requires Node.js and npm** (which provides `npx`).                                                |
+| **`npm install -g mcp-server-sfmc`**           | Same CLI as `npx`, but the package stays on disk so **startup is faster** and you can set `"command": "mcp-server-sfmc"` with empty `args` in your MCP config.                                                               |
+| **`npm install mcp-server-sfmc` in a project** | Keeps a **pinned version** in that folder's `node_modules` — point your MCP config at `npx mcp-server-sfmc` with `cwd` set to the project, or run `./node_modules/.bin/mcp-server-sfmc` directly.                            |
+| **`sfmc-review-diff` (bundled CLI)**           | For **CI**: spawns this MCP server, calls `review_change` on a unified diff (stdin or file), exits non-zero on `ERROR` by default. Install the package in the job, then e.g. `git diff base...HEAD \| npx sfmc-review-diff`. |
 
 None of these replace the VS Code extension for **editing** (syntax, LSP, snippets); they only expose the **MCP server** to tools that speak the Model Context Protocol.
 
@@ -39,20 +39,20 @@ Ready-to-copy workflows (GitHub Actions, GitLab CI, Jenkins, Azure Pipelines, Bi
 
 ## What it gives your AI assistant
 
-| Feature | Details |
-|---|---|
-| **Validation** | Syntax errors, unknown functions, arity mismatches, unsupported SSJS syntax; `target: 'next'` flags MCN-incompatible functions and all SSJS |
-| **Lookup** | Full function signatures, parameters, return types, MCN compatibility badge (API version), behavioral notes, and examples |
-| **PR review** | Diff-aware review tool that surfaces issues in the exact lines that changed |
-| **Fix suggestions** | Concrete, compilable replacement code; `target: 'next'` includes MCN platform issues |
-| **Completions** | AMPscript completions (filtered to MCN-supported when `target: 'next'`); SSJS catalog (redirects to AMPscript for MCN) |
-| **Platform detection** | `detect_sfmc_platform` checks `.mcdevrc.json` (MCE) or `sfdx-project.json` (MCN) in the project root |
+| Feature                        | Details                                                                                                                                                                                        |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Validation**                 | Syntax errors, unknown functions, arity mismatches, unsupported SSJS syntax; `target: 'next'` flags MCN-incompatible functions and all SSJS                                                    |
+| **Lookup**                     | Full function signatures, parameters, return types, MCN compatibility badge (API version), behavioral notes, and examples                                                                      |
+| **PR review**                  | Diff-aware review tool that surfaces issues in the exact lines that changed                                                                                                                    |
+| **Fix suggestions**            | Concrete, compilable replacement code; `target: 'next'` includes MCN platform issues                                                                                                           |
+| **Completions**                | AMPscript completions (filtered to MCN-supported when `target: 'next'`); SSJS catalog (redirects to AMPscript for MCN)                                                                         |
+| **Platform detection**         | `detect_sfmc_platform` checks `.mcdevrc.json` (MCE) or `sfdx-project.json` (MCN) in the project root                                                                                           |
 | **MCN compatibility analysis** | `check_mcn_compatibility` analyzes files for MCN readiness — per-function classification (supported / needs review / not supported), SSJS block migration difficulty, and an executive summary |
-| **MCN migration** | `rewrite_for_mcn` (tool + prompt) deterministically rewrites AMPscript and converts convertible SSJS to AMPscript for MCN, then applies AI reasoning to remaining manual-rewrite sections |
-| **Code conversion** | `convertSsjsToAmpscript` and `convertAmpscriptToSsjs` (tool + prompt hybrid) — rule-based conversion with AI-enhanced handling of flagged sections |
-| **Prompts** | Guided prompts for writing AMPscript/SSJS (with MCN constraints), reviewing code, converting between the two, and rewriting for MCN |
-| **Resources** | Full function catalogs, keyword list, unsupported ES6+ syntax list |
-| **Help search** | `search_help` (unified, auto-detects MCE vs MCN from project root); `search_mce_help` (MCE help, 7 product scopes); `search_mcn_help` (MCN developer API reference) |
+| **MCN migration**              | `rewrite_for_mcn` (tool + prompt) deterministically rewrites AMPscript and converts convertible SSJS to AMPscript for MCN, then applies AI reasoning to remaining manual-rewrite sections      |
+| **Code conversion**            | `convertSsjsToAmpscript` and `convertAmpscriptToSsjs` (tool + prompt hybrid) — rule-based conversion with AI-enhanced handling of flagged sections                                             |
+| **Prompts**                    | Guided prompts for writing AMPscript/SSJS (with MCN constraints), reviewing code, converting between the two, and rewriting for MCN                                                            |
+| **Resources**                  | Full function catalogs, keyword list, unsupported ES6+ syntax list                                                                                                                             |
+| **Help search**                | `search_help` (unified, auto-detects MCE vs MCN from project root); `search_mce_help` (MCE help, 7 product scopes); `search_mcn_help` (MCN developer API reference)                            |
 
 ## Connecting AI clients
 
@@ -138,53 +138,53 @@ Then replace `"command": "npx", "args": ["-y", "mcp-server-sfmc@latest"]` with:
 
 ## Tools
 
-| Tool | Description |
-|---|---|
-| `validate_ampscript` | Validate AMPscript code — unknown functions, arity, delimiter balance, comment syntax. `target: 'next'` flags MCN-incompatible functions. |
-| `validate_ssjs` | Validate SSJS — ES6+ usage, missing Platform.Load, wrong API calls. `target: 'next'` flags all SSJS as unsupported. |
-| `validate_sfmc_html` | Validate HTML with embedded AMPscript, SSJS, and GTL blocks. `target: 'next'` enables MCN validation. |
-| `lookup_ampscript_function` | Full signature, parameters, return type, MCN compatibility badge (API version), behavioral notes for MCN, and examples |
-| `lookup_ssjs_function` | Full signature and description for any SSJS Platform function or method |
-| `list_ampscript_functions` | List all AMPscript functions, optionally filtered by `platform: 'next'` to return only MCN-supported functions |
-| `review_change` | Review a unified diff — validates only added lines, maps back to diff line numbers |
-| `suggest_fix` | Generate fix suggestions for each diagnostic in a code snippet. `target: 'next'` includes MCN fixes. |
-| `get_ampscript_completions` | List valid completions at a given cursor position; MCN-unsupported functions marked `[MCE only]` when `target: 'next'` |
-| `get_ssjs_completions` | List SSJS Platform API completions, optionally filtered by prefix; redirects to AMPscript completions when `target: 'next'` |
-| `format_sfmc_code` | Apply basic formatting conventions (keyword casing, quote normalisation) |
-| `detect_sfmc_platform` | Detect the target platform for a project — checks `.mcdevrc.json` (→ `"engagement"`) or `sfdx-project.json` (→ `"next"`) |
-| `check_mcn_compatibility` | Analyze one or more AMPscript/HTML files for MCN readiness. Returns per-function classification, SSJS block migration difficulty, and an executive summary with overall migration effort. Run this before `rewrite_for_mcn`. |
-| `rewrite_for_mcn` | Deterministic MCN rewrite engine: fixes `.NET → Java` format strings, removes `StringToDate` wrappers, converts convertible SSJS to AMPscript, marks unsupported functions, annotates the rest as `MANUAL_REWRITE_REQUIRED`. **Prefer the `rewrite_for_mcn` prompt** for interactive use — it calls this tool first, then applies AI reasoning to the flagged sections. Use the tool directly only for structured JSON output in pipelines. |
-| `convertSsjsToAmpscript` | Rule-based SSJS → AMPscript conversion engine: `Platform.Function.*` → AMPscript equivalents, variable/request access, control flow. Flags JS-native constructs as `MANUAL_REWRITE_REQUIRED`. **Prefer the `convertSsjsToAmpscript` prompt** for interactive use. |
-| `convertAmpscriptToSsjs` | Rule-based AMPscript → SSJS conversion engine: variables, control flow, function calls. Flags AMPscript-only constructs as `MANUAL_REWRITE_REQUIRED`. **Prefer the `convertAmpscriptToSsjs` prompt** for interactive use. |
-| `search_help` | **Unified help search** — auto-detects the platform from `projectRoot` and routes to the right doc index. MCN projects search both the developer API reference and MCN admin docs. Pass `target` to override detection. |
-| `search_mce_help` | Search bundled Marketing Cloud Engagement setup/ops help; use `product_focus` to target Engagement vs Next |
-| `search_mcn_help` | Search bundled Marketing Cloud Next developer API documentation (objects, flows, segments, REST/SOAP APIs, AMPscript behavior in MCN) |
+| Tool                        | Description                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate_ampscript`        | Validate AMPscript code — unknown functions, arity, delimiter balance, comment syntax. `target: 'next'` flags MCN-incompatible functions.                                                                                                                                                                                                                                                                                                   |
+| `validate_ssjs`             | Validate SSJS — ES6+ usage, missing Platform.Load, wrong API calls. `target: 'next'` flags all SSJS as unsupported.                                                                                                                                                                                                                                                                                                                         |
+| `validate_sfmc_html`        | Validate HTML with embedded AMPscript, SSJS, and GTL blocks. `target: 'next'` enables MCN validation.                                                                                                                                                                                                                                                                                                                                       |
+| `lookup_ampscript_function` | Full signature, parameters, return type, MCN compatibility badge (API version), behavioral notes for MCN, and examples                                                                                                                                                                                                                                                                                                                      |
+| `lookup_ssjs_function`      | Full signature and description for any SSJS Platform function or method                                                                                                                                                                                                                                                                                                                                                                     |
+| `list_ampscript_functions`  | List all AMPscript functions, optionally filtered by `platform: 'next'` to return only MCN-supported functions                                                                                                                                                                                                                                                                                                                              |
+| `review_change`             | Review a unified diff — validates only added lines, maps back to diff line numbers                                                                                                                                                                                                                                                                                                                                                          |
+| `suggest_fix`               | Generate fix suggestions for each diagnostic in a code snippet. `target: 'next'` includes MCN fixes.                                                                                                                                                                                                                                                                                                                                        |
+| `get_ampscript_completions` | List valid completions at a given cursor position; MCN-unsupported functions marked `[MCE only]` when `target: 'next'`                                                                                                                                                                                                                                                                                                                      |
+| `get_ssjs_completions`      | List SSJS Platform API completions, optionally filtered by prefix; redirects to AMPscript completions when `target: 'next'`                                                                                                                                                                                                                                                                                                                 |
+| `format_sfmc_code`          | Apply basic formatting conventions (keyword casing, quote normalisation)                                                                                                                                                                                                                                                                                                                                                                    |
+| `detect_sfmc_platform`      | Detect the target platform for a project — checks `.mcdevrc.json` (→ `"engagement"`) or `sfdx-project.json` (→ `"next"`)                                                                                                                                                                                                                                                                                                                    |
+| `check_mcn_compatibility`   | Analyze one or more AMPscript/HTML files for MCN readiness. Returns per-function classification, SSJS block migration difficulty, and an executive summary with overall migration effort. Run this before `rewrite_for_mcn`.                                                                                                                                                                                                                |
+| `rewrite_for_mcn`           | Deterministic MCN rewrite engine: fixes `.NET → Java` format strings, removes `StringToDate` wrappers, converts convertible SSJS to AMPscript, marks unsupported functions, annotates the rest as `MANUAL_REWRITE_REQUIRED`. **Prefer the `rewrite_for_mcn` prompt** for interactive use — it calls this tool first, then applies AI reasoning to the flagged sections. Use the tool directly only for structured JSON output in pipelines. |
+| `convertSsjsToAmpscript`    | Rule-based SSJS → AMPscript conversion engine: `Platform.Function.*` → AMPscript equivalents, variable/request access, control flow. Flags JS-native constructs as `MANUAL_REWRITE_REQUIRED`. **Prefer the `convertSsjsToAmpscript` prompt** for interactive use.                                                                                                                                                                           |
+| `convertAmpscriptToSsjs`    | Rule-based AMPscript → SSJS conversion engine: variables, control flow, function calls. Flags AMPscript-only constructs as `MANUAL_REWRITE_REQUIRED`. **Prefer the `convertAmpscriptToSsjs` prompt** for interactive use.                                                                                                                                                                                                                   |
+| `search_help`               | **Unified help search** — auto-detects the platform from `projectRoot` and routes to the right doc index. MCN projects search both the developer API reference and MCN admin docs. Pass `target` to override detection.                                                                                                                                                                                                                     |
+| `search_mce_help`           | Search bundled Marketing Cloud Engagement setup/ops help; use `product_focus` to target Engagement vs Next                                                                                                                                                                                                                                                                                                                                  |
+| `search_mcn_help`           | Search bundled Marketing Cloud Next developer API documentation (objects, flows, segments, REST/SOAP APIs, AMPscript behavior in MCN)                                                                                                                                                                                                                                                                                                       |
 
 ## Resources
 
-| URI | Description |
-|---|---|
-| `sfmc://ampscript/functions` | Full AMPscript function catalog with signatures |
-| `sfmc://ssjs/functions` | Full SSJS function catalog |
-| `sfmc://ampscript/keywords` | All AMPscript keywords |
-| `sfmc://ssjs/unsupported-syntax` | ES6+ features not supported in SFMC SSJS |
-| `sfmc://mce/product-context` | How **Marketing Cloud Engagement** differs from **Marketing Cloud Next** (when to use which) |
-| `sfmc://mce/help-index` | List of bundled MCE help files and section counts per product scope |
-| `sfmc://mcn/help-index` | List of bundled MCN developer API doc files and chunk counts |
+| URI                              | Description                                                                                  |
+| -------------------------------- | -------------------------------------------------------------------------------------------- |
+| `sfmc://ampscript/functions`     | Full AMPscript function catalog with signatures                                              |
+| `sfmc://ssjs/functions`          | Full SSJS function catalog                                                                   |
+| `sfmc://ampscript/keywords`      | All AMPscript keywords                                                                       |
+| `sfmc://ssjs/unsupported-syntax` | ES6+ features not supported in SFMC SSJS                                                     |
+| `sfmc://mce/product-context`     | How **Marketing Cloud Engagement** differs from **Marketing Cloud Next** (when to use which) |
+| `sfmc://mce/help-index`          | List of bundled MCE help files and section counts per product scope                          |
+| `sfmc://mcn/help-index`          | List of bundled MCN developer API doc files and chunk counts                                 |
 
 ## Prompts
 
 Access via `/mcp.sfmc.writeAmpscript` etc. in VS Code, or via the prompts API:
 
-| Prompt | Description |
-|---|---|
-| `writeAmpscript` | Generate AMPscript code for a described task. `target: 'next'` enforces MCN constraints (MCN-supported functions only, Java `SimpleDateFormat` patterns, no SSJS). |
-| `writeSsjs` | Generate SSJS code for a described task. `target: 'next'` redirects to AMPscript instead (SSJS is not available in MCN). |
-| `reviewSfmcCode` | Review AMPscript or SSJS code for bugs and best-practice violations. `target: 'next'` adds MCN compatibility checklist. |
-| `rewrite_for_mcn` | **Primary interface for MCN migration.** Internally calls the `rewrite_for_mcn` tool for all deterministic rewrites, then applies AI reasoning to every `MANUAL_REWRITE_REQUIRED` section — producing a single fully migrated code block with a prose changelog. You always get both the rule-based pass and the AI pass in one step. |
-| `convertSsjsToAmpscript` | **Primary interface for SSJS → AMPscript conversion.** Internally calls the `convertSsjsToAmpscript` tool for rule-based conversion, then AI-reasons over any sections the rules could not handle. |
-| `convertAmpscriptToSsjs` | **Primary interface for AMPscript → SSJS conversion.** Internally calls the `convertAmpscriptToSsjs` tool for rule-based conversion, then applies AI reasoning to flagged AMPscript-only constructs. |
-| `answerMceHowTo` | Guided prompt for admin/setup questions — searches bundled help and keeps Engagement vs Next explicit |
+| Prompt                   | Description                                                                                                                                                                                                                                                                                                                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `writeAmpscript`         | Generate AMPscript code for a described task. `target: 'next'` enforces MCN constraints (MCN-supported functions only, Java `SimpleDateFormat` patterns, no SSJS).                                                                                                                                                                    |
+| `writeSsjs`              | Generate SSJS code for a described task. `target: 'next'` redirects to AMPscript instead (SSJS is not available in MCN).                                                                                                                                                                                                              |
+| `reviewSfmcCode`         | Review AMPscript or SSJS code for bugs and best-practice violations. `target: 'next'` adds MCN compatibility checklist.                                                                                                                                                                                                               |
+| `rewrite_for_mcn`        | **Primary interface for MCN migration.** Internally calls the `rewrite_for_mcn` tool for all deterministic rewrites, then applies AI reasoning to every `MANUAL_REWRITE_REQUIRED` section — producing a single fully migrated code block with a prose changelog. You always get both the rule-based pass and the AI pass in one step. |
+| `convertSsjsToAmpscript` | **Primary interface for SSJS → AMPscript conversion.** Internally calls the `convertSsjsToAmpscript` tool for rule-based conversion, then AI-reasons over any sections the rules could not handle.                                                                                                                                    |
+| `convertAmpscriptToSsjs` | **Primary interface for AMPscript → SSJS conversion.** Internally calls the `convertAmpscriptToSsjs` tool for rule-based conversion, then applies AI reasoning to flagged AMPscript-only constructs.                                                                                                                                  |
+| `answerMceHowTo`         | Guided prompt for admin/setup questions — searches bundled help and keeps Engagement vs Next explicit                                                                                                                                                                                                                                 |
 
 ## Migrating code to Marketing Cloud Next
 
@@ -233,10 +233,10 @@ The same hybrid pattern applies to `convertSsjsToAmpscript` and `convertAmpscrip
 
 ### MCN behavioral differences to watch for
 
-| Function | Difference |
-|---|---|
-| `FormatDate` | Uses **Java `SimpleDateFormat`** patterns in MCN instead of .NET. Example: `.NET "M/d/yyyy h:mm:ss tt"` → Java `"M/d/yyyy h:mm:ss a"` |
-| `Lookup` | Search arguments must come in column/value pairs — an **odd argument count causes an error** in MCN. All filter keys must fully specify the composite primary key. |
+| Function       | Difference                                                                                                                                                                                                                                            |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FormatDate`   | Uses **Java `SimpleDateFormat`** patterns in MCN instead of .NET. Example: `.NET "M/d/yyyy h:mm:ss tt"` → Java `"M/d/yyyy h:mm:ss a"`                                                                                                                 |
+| `Lookup`       | Search arguments must come in column/value pairs — an **odd argument count causes an error** in MCN. All filter keys must fully specify the composite primary key.                                                                                    |
 | `StringToDate` | Returns a **locale-formatted string** in MCN (G standard format, e.g. `"5/15/2026 1:23:45 PM"`) instead of a dateTime object. Cannot be reliably passed to `FormatDate()` in MCN — use `FormatDate()` directly with the original date string instead. |
 
 ### CloudPages functions — not migratable
@@ -251,18 +251,18 @@ Clients that honour the MCP `instructions` field (Cursor, Claude Desktop, GitHub
 
 ### Quick reference: which tool or prompt to use
 
-| Situation | What to do |
-|---|---|
-| MCE admin question (classic Engagement) | Ask naturally; the server calls `search_help` (or `search_mce_help` directly). Or use the `answerMceHowTo` prompt with `assumeProduct: engagement`. |
-| Marketing Cloud Next developer API question | The server calls `search_help` or `search_mcn_help` automatically. Or use `search_mcn_help` explicitly. |
-| MCN operational / migration / setup question | Use `search_mce_help` with `product_focus: 'next'`, or ask naturally and the server routes it. |
-| Not sure which product | Use `answerMceHowTo` with `assumeProduct: unsure`, or `search_help` without a `target`. |
-| Write or validate AMPscript | Use the `writeAmpscript` prompt, or ask directly (the server auto-validates). Add `target: 'next'` for MCN. |
-| Write or validate SSJS | Use the `writeSsjs` prompt, or ask directly. Note: SSJS is not supported in MCN. |
-| Check if code is MCN-ready | Use `check_mcn_compatibility` with your file contents. |
-| Migrate code to Marketing Cloud Next | Use the `rewrite_for_mcn` **prompt** — it calls the tool internally for deterministic rewrites, then applies AI reasoning to any remaining manual sections. Use the tool directly only when you need structured JSON output in a pipeline. |
-| Convert SSJS ↔ AMPscript | Use the `convertSsjsToAmpscript` or `convertAmpscriptToSsjs` **prompt** — same hybrid pattern: tool runs first, AI handles what the rules couldn't. |
-| Review a code diff | Use the `reviewSfmcCode` prompt or mention "review the following diff". |
+| Situation                                    | What to do                                                                                                                                                                                                                                 |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| MCE admin question (classic Engagement)      | Ask naturally; the server calls `search_help` (or `search_mce_help` directly). Or use the `answerMceHowTo` prompt with `assumeProduct: engagement`.                                                                                        |
+| Marketing Cloud Next developer API question  | The server calls `search_help` or `search_mcn_help` automatically. Or use `search_mcn_help` explicitly.                                                                                                                                    |
+| MCN operational / migration / setup question | Use `search_mce_help` with `product_focus: 'next'`, or ask naturally and the server routes it.                                                                                                                                             |
+| Not sure which product                       | Use `answerMceHowTo` with `assumeProduct: unsure`, or `search_help` without a `target`.                                                                                                                                                    |
+| Write or validate AMPscript                  | Use the `writeAmpscript` prompt, or ask directly (the server auto-validates). Add `target: 'next'` for MCN.                                                                                                                                |
+| Write or validate SSJS                       | Use the `writeSsjs` prompt, or ask directly. Note: SSJS is not supported in MCN.                                                                                                                                                           |
+| Check if code is MCN-ready                   | Use `check_mcn_compatibility` with your file contents.                                                                                                                                                                                     |
+| Migrate code to Marketing Cloud Next         | Use the `rewrite_for_mcn` **prompt** — it calls the tool internally for deterministic rewrites, then applies AI reasoning to any remaining manual sections. Use the tool directly only when you need structured JSON output in a pipeline. |
+| Convert SSJS ↔ AMPscript                     | Use the `convertSsjsToAmpscript` or `convertAmpscriptToSsjs` **prompt** — same hybrid pattern: tool runs first, AI handles what the rules couldn't.                                                                                        |
+| Review a code diff                           | Use the `reviewSfmcCode` prompt or mention "review the following diff".                                                                                                                                                                    |
 
 ### Copy-paste prompt templates
 
@@ -365,11 +365,56 @@ To rebuild both indexes in one command: `npm run bundle-all`
 
 ## AI code review in pull requests
 
+### Cursor Bugbot
+
+[Cursor Bugbot](https://cursor.com/bugbot) reviews pull requests (GitHub) and merge
+requests (GitLab) automatically, leaves inline comments with fix suggestions, and publishes
+a `Cursor Bugbot` check. It does not run `sfmc-review-diff` itself — you make it
+SFMC-aware in two ways:
+
+**1. Repository rules (`BUGBOT.md`) — all plans.** Copy
+[`ci-templates/BUGBOT.md`](ci-templates/BUGBOT.md) to **`.cursor/BUGBOT.md`** in your repo
+root. It tells Bugbot how to review AMPscript, SSJS, and SFMC HTML — unknown functions,
+arity, delimiter balance, ES3-only SSJS, and optional Marketing Cloud Next migration
+rules. Bugbot reads the root file plus any nested `.cursor/BUGBOT.md` files near changed
+files, so you can scope stricter rules to subfolders.
+
+**2. MCP tools (`mcp-server-sfmc`) — Team / Enterprise plans only.** Bugbot can call MCP
+tools during a review so its findings come from the same language catalog as the editor:
+
+1. In the [Bugbot dashboard](https://cursor.com/dashboard?tab=bugbot), enable Bugbot on
+   the repository.
+2. Open the **MCP** configuration for Bugbot and add this server:
+
+```json
+{
+  "mcpServers": {
+    "sfmc": {
+      "command": "npx",
+      "args": ["-y", "mcp-server-sfmc@latest"]
+    }
+  }
+}
+```
+
+3. Add the tools to Bugbot in the dashboard. The relevant review tools are
+   `review_change`, `validate_ampscript`, `validate_ssjs`, `validate_sfmc_html`, and
+   `suggest_fix`. The `BUGBOT.md` rules above instruct Bugbot when to call them.
+
+> Branch protection: require the **`Cursor Bugbot`** check to make sure a review runs
+> before merge. Findings default to a `neutral` conclusion; enable
+> fail-on-unresolved-issues in the dashboard (where available) if you want findings to
+> produce a failing check.
+
+**Run it locally first.** In Cursor 3.7+, run `/review-bugbot` on your branch before you
+push; Bugbot reuses that review on the PR/MR with the same diff, avoiding a duplicate run.
+
 ### GitHub Copilot (cloud agent)
 
 The `.github/agents/sfmc-reviewer.agent.md` custom agent in this repository configures a GitHub Copilot cloud agent that uses `mcp-server-sfmc` for SFMC-aware PR reviews.
 
 To enable it in your own repository:
+
 1. Copy `.github/agents/sfmc-reviewer.agent.md` to your repo.
 2. In your GitHub repo settings → **Copilot → Cloud agent → MCP configuration**, add:
 
@@ -401,17 +446,23 @@ Copy `.github/copilot-instructions.md` from this repo to your project. GitHub Co
 
 ### CI linting (deterministic checks)
 
-For deterministic, blocking CI validation, use the **eslint-plugin-sfmc** templates provided in `ci-templates/`:
+For deterministic, blocking CI validation, use the templates provided in `ci-templates/`.
+Each one runs **two checks** on every PR/MR: `eslint-plugin-sfmc` on changed files, and
+`sfmc-review-diff` (this package) on the unified diff — so a finding fails the job
+regardless of which AI reviewer (Bugbot, Copilot, Duo) is also enabled.
 
-| Platform | File |
-|---|---|
-| GitHub Actions | [`github-actions.yml`](.github/workflows/sfmc-lint.yml) |
-| GitLab CI | [`ci-templates/gitlab-ci.yml`](ci-templates/gitlab-ci.yml) |
-| Jenkins | [`ci-templates/Jenkinsfile`](ci-templates/Jenkinsfile) |
-| Azure DevOps | [`ci-templates/azure-pipelines.yml`](ci-templates/azure-pipelines.yml) |
+| Platform            | File                                                                           |
+| ------------------- | ------------------------------------------------------------------------------ |
+| GitHub Actions      | [`ci-templates/github-action.yml`](ci-templates/github-action.yml)             |
+| GitLab CI           | [`ci-templates/gitlab-ci.yml`](ci-templates/gitlab-ci.yml)                     |
+| Jenkins             | [`ci-templates/Jenkinsfile`](ci-templates/Jenkinsfile)                         |
+| Azure DevOps        | [`ci-templates/azure-pipelines.yml`](ci-templates/azure-pipelines.yml)         |
 | Bitbucket Pipelines | [`ci-templates/bitbucket-pipelines.yml`](ci-templates/bitbucket-pipelines.yml) |
 
-These templates run `eslint-plugin-sfmc` on changed files and post lint results as PR/MR comments.
+The ESLint job posts lint results as PR/MR comments; the `sfmc-review-diff` job exits
+non-zero on `ERROR` diagnostics by default (`--fail-on warning|info` to be stricter).
+See [`ci-templates/README.md`](ci-templates/README.md) for the difference between the two
+checks.
 
 ### ESLint + @eslint/mcp
 
