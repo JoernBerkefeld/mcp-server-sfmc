@@ -40,6 +40,12 @@ import {
     rewriteAmpForMcn,
     isSsjsBlockConvertible,
 } from './conversion-rules.js';
+import {
+    ECMASCRIPT_BUILTINS,
+    KNOWN_UNSUPPORTED,
+    polyfillByPrototypeName,
+    polyfillByStaticName,
+} from 'ssjs-data';
 
 function projectPackageRoot(): string {
     return path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -91,6 +97,24 @@ const SERVER_INSTRUCTIONS =
     '## When to call language tools\n\n' +
     'For AMPscript/SSJS/GTL code tasks use `validate_*`, `lookup_*`, `review_change`, `suggest_fix`, etc. ' +
     'Do **not** guess function signatures — call `lookup_ampscript_function` or `lookup_ssjs_function`.\n\n' +
+    '## SSJS authoring discipline — non-negotiable\n\n' +
+    'When you write or convert SSJS you MUST treat this server (LSP + ssjs-data) as the **only** source of ' +
+    'truth about what JavaScript works in the SFMC engine. Do **not** rely on your general JavaScript ' +
+    'knowledge — the SFMC SSJS engine is an ES3/ES5-era dialect with many missing or broken built-ins.\n\n' +
+    '1. **Verify every identifier before you use it.** For any SFMC API (Platform function, WSProxy, HTTP, ' +
+    'global) or ECMAScript built-in (`Array`/`String`/`Math`/`JSON`/`Object`/`Date`/`RegExp`/global method or ' +
+    'property), call `lookup_ssjs_function` first.\n' +
+    '   - `supported` → use it normally.\n' +
+    '   - `supported-with-caveat` → respect the caveat; if a polyfill is offered, emit the polyfill and use it.\n' +
+    '   - `polyfillable` → **emit the returned ES3-safe polyfill source once** (after `Platform.Load`, before ' +
+    'first use), then call the method normally. Never use the bare broken/unavailable method without its polyfill.\n' +
+    '   - `unsupported` → do not use it; follow the suggestion (use a Platform.Function or a literal).\n' +
+    '   - `unknown` → do not assume it works; prefer a catalogued built-in or Platform.Function.\n' +
+    '2. **Always document the methods you write.** Every function/method you author in SSJS gets a JSDoc block ' +
+    'immediately above it: a one-line description, one `@param` line per parameter (wrap the name in `[]` when ' +
+    'optional, e.g. `@param {string} [prefix] - ...`) with a description, and a `@returns` line.\n' +
+    '3. **Comment your code blocks.** Add a short comment line above each logical block (in both AMPscript and ' +
+    'SSJS) explaining what it does, to aid readability.\n\n' +
     '## Unified help search shortcut\n\n' +
     'When you already know the project root, prefer `search_help` over calling `search_mce_help` or ' +
     '`search_mcn_help` directly. Pass `projectRoot` and `search_help` will auto-detect the platform ' +
@@ -382,22 +406,169 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// ECMAScript-builtin support lookup, sourced exclusively from ssjs-data.
+// Used as a fall-through inside lookup_ssjs_function so a single tool answers
+// "can I use X in SSJS?" for both SFMC APIs and plain-JavaScript built-ins.
+// This is the ONLY sanctioned way for an agent to learn whether a plain-JS
+// method/property works in the SFMC SSJS engine, whether it has a caveat, and —
+// when broken/unavailable — whether a shipped polyfill exists and its source.
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalise an owner string to ssjs-data's `owner` convention.
+ * @param owner - Raw owner hint, e.g. "Array", "String.prototype", "Math", "JSON".
+ * @returns {string} The normalised owner, e.g. "Array.prototype".
+ */
+function normaliseOwner(owner: string): string {
+    const o = owner.trim();
+    // Accept "Array", "Array.prototype", "String.prototype", "Math", "JSON", etc.
+    if (/^(Array|String)$/i.test(o))
+        return `${o[0].toUpperCase()}${o.slice(1).toLowerCase()}.prototype`;
+    return o;
+}
+
+interface SsjsMethodLookupResult {
+    status: 'supported' | 'supported-with-caveat' | 'polyfillable' | 'unsupported' | 'unknown';
+    text: string;
+}
+
+/**
+ * Look up an ECMAScript built-in / polyfillable / known-unsupported member by
+ * name (optionally disambiguated by owner) against the ssjs-data catalogs.
+ * @param method - The method/property name, optionally fully qualified (e.g. "Array.prototype.slice", "slice").
+ * @param [ownerHint] - Optional owner to disambiguate a bare method name (e.g. "Array.prototype", "Math").
+ * @returns {SsjsMethodLookupResult} A status + rendered markdown text describing engine support and any polyfill.
+ */
+function lookupSsjsBuiltin(method: string, ownerHint?: string): SsjsMethodLookupResult {
+    // Accept "Array.prototype.slice", "String.slice", "slice", "JSON.parse", "Math.max".
+    let bareMethod = method.trim();
+    let owner = ownerHint?.trim();
+    const dotMatch = bareMethod.match(/^(.*)\.([A-Za-z0-9_$]+)$/);
+    if (dotMatch && !owner) {
+        owner = dotMatch[1];
+        bareMethod = dotMatch[2];
+    } else if (dotMatch && owner) {
+        bareMethod = dotMatch[2];
+    }
+    const normOwner = owner ? normaliseOwner(owner) : undefined;
+
+    const ownerMatches = (entryOwner: string): boolean => {
+        if (!normOwner) return true;
+        if (entryOwner.toLowerCase() === normOwner.toLowerCase()) return true;
+        // also match e.g. owner "String" against "String.prototype"
+        const ownerBase = normOwner.replace(/\.prototype$/i, '');
+        const entryBase = entryOwner.replace(/\.prototype$/i, '');
+        return ownerBase.toLowerCase() === entryBase.toLowerCase();
+    };
+
+    // 1. Supported built-in (possibly with a caveat)?
+    const builtin = ECMASCRIPT_BUILTINS.find(
+        (b) => b.name.toLowerCase() === bareMethod.toLowerCase() && ownerMatches(b.owner)
+    );
+    if (builtin) {
+        const lines = [
+            `## ${builtin.owner}.${builtin.name} — ✅ supported`,
+            '',
+            `**Description:** ${builtin.description}`,
+        ];
+        if (builtin.syntax) lines.push('', `**Syntax:** \`${builtin.syntax}\``);
+        if (builtin.caveat) {
+            lines.push('', `⚠️ **Caveat (SFMC engine):** ${builtin.caveat}`);
+            // A caveat member may also be polyfillable — surface the polyfill too.
+            const poly =
+                polyfillByPrototypeName.get(bareMethod) ?? polyfillByStaticName.get(bareMethod);
+            if (poly && ownerMatches(poly.owner)) {
+                lines.push(
+                    '',
+                    '**Polyfill available** — emit this once before using the method to guarantee correct behaviour:',
+                    '```javascript',
+                    poly.polyfill,
+                    '```'
+                );
+            } else {
+                lines.push(
+                    '',
+                    'Apply the documented workaround in the caveat to avoid the broken form.'
+                );
+            }
+            return { status: 'supported-with-caveat', text: lines.join('\n') };
+        }
+        return { status: 'supported', text: lines.join('\n') };
+    }
+
+    // 2. Polyfillable (unavailable or broken, but ssjs-data ships a polyfill)?
+    const poly = polyfillByPrototypeName.get(bareMethod) ?? polyfillByStaticName.get(bareMethod);
+    if (poly && ownerMatches(poly.owner)) {
+        return {
+            status: 'polyfillable',
+            text: [
+                `## ${poly.owner}.${poly.method} — 🔧 ${poly.category} (polyfill available)`,
+                '',
+                `**Description:** ${poly.description}`,
+                '',
+                'This member is **not safe to use directly** in SFMC SSJS. Emit the polyfill below **once** ' +
+                    '(before first use, after `Platform.Load`) and then call the method normally:',
+                '```javascript',
+                poly.polyfill,
+                '```',
+            ].join('\n'),
+        };
+    }
+
+    // 3. Known-unsupported (no shipped polyfill)?
+    const unsupported = KNOWN_UNSUPPORTED.find(
+        (u) => u.member.toLowerCase() === bareMethod.toLowerCase() && ownerMatches(u.owner)
+    );
+    if (unsupported) {
+        return {
+            status: 'unsupported',
+            text: [
+                `## ${unsupported.owner}.${unsupported.member} — ❌ ${unsupported.category} (no polyfill)`,
+                '',
+                `**Do not use this in SSJS.** ${unsupported.suggestion}`,
+            ].join('\n'),
+        };
+    }
+
+    // 4. Not catalogued.
+    return {
+        status: 'unknown',
+        text:
+            `SSJS function/method "${ownerHint ? `${ownerHint}.` : ''}${bareMethod}" not found in the ssjs-data ` +
+            'catalogs (SFMC APIs, ECMAScript built-ins, polyfillable members, or known-unsupported members). ' +
+            'Treat it as **unverified**: do not assume it works in SFMC SSJS. Prefer a documented ' +
+            'Platform.Function or a catalogued built-in, or ask the user to confirm against a CloudPage test.',
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Tool: lookup_ssjs_function
 // ---------------------------------------------------------------------------
 
 server.tool(
     'lookup_ssjs_function',
-    'Look up the signature, parameters, and description for an SSJS function or method. ' +
-        'Searches Platform functions, WSProxy methods, HTTP methods, and global functions. Case-insensitive. ' +
-        'Surfaces deprecation warnings, Platform.Load requirements, static/alias metadata when available.',
+    'Authoritative lookup (sourced ONLY from the LSP + ssjs-data) for anything you want to use in SSJS. ' +
+        'Call this BEFORE writing any SSJS identifier — do not rely on general JavaScript knowledge. ' +
+        'Covers (a) SFMC APIs — Platform functions, WSProxy methods, HTTP methods, global functions (with ' +
+        'signature, parameters, description, deprecation, Platform.Load requirement, static/alias metadata), and ' +
+        '(b) plain-JavaScript ECMAScript built-ins (Array/String/Math/JSON/Object/Date/RegExp/global), returning ' +
+        'one of: supported, supported-with-caveat (caveat + any polyfill), polyfillable (with ES3-safe polyfill ' +
+        'source to emit), unsupported (no polyfill), or unknown. Case-insensitive. ' +
+        'Examples: "Lookup", "Platform.Function.Lookup", "Array.prototype.slice", "JSON.parse", "Math.max".',
     {
         name: z
             .string()
             .describe(
-                'The function or method name, e.g. "Lookup", "retrieve", "Get". May include namespace like "Platform.Function.Lookup".'
+                'The function/method/property name. May include a namespace or owner, e.g. "Platform.Function.Lookup", "Array.prototype.slice", "JSON.parse", "Math.max", or a bare name like "Lookup" or "slice".'
+            ),
+        owner: z
+            .string()
+            .optional()
+            .describe(
+                'Optional owner to disambiguate a bare ECMAScript built-in name, e.g. "Array.prototype", "String.prototype", "Math", "JSON".'
             ),
     },
-    ({ name }) => {
+    ({ name, owner }) => {
         // Strip namespace prefix for lookup
         const bare = name.replace(
             /^(Platform\.(Function|Variable|Response|Request|ClientBrowser|Recipient|DateTime)\.|WSProxy\.|HTTP\.|Script\.Util\.|Function\.|Variable\.|Response\.|Request\.)/i,
@@ -405,9 +576,9 @@ server.tool(
         );
         const fn = sfmcLanguageService.lookupSsjsFunction(bare);
         if (!fn) {
-            return {
-                content: [{ type: 'text', text: `SSJS function/method "${name}" not found.` }],
-            };
+            // Fall through to the ECMAScript built-in / polyfill / unsupported catalogs.
+            const builtinResult = lookupSsjsBuiltin(name, owner);
+            return { content: [{ type: 'text', text: builtinResult.text }] };
         }
 
         const params = (fn.params ?? [])
@@ -1351,13 +1522,31 @@ server.prompt(
                                   'Generate SSJS code for the following task.',
                                   '',
                                   '## Rules',
-                                  '- SSJS runs in an ES5 engine. Use `var`, not `let`/`const`.',
+                                  '- SSJS runs in an ES3/ES5-era engine. Use `var`, not `let`/`const`.',
                                   '- No arrow functions, template literals, destructuring, or `class`.',
                                   '- Wrap code in `<script runat="server">` ... `</script>`.',
                                   '- Use `Platform.Load("core", "1.1.5");` before accessing Core library objects.',
                                   '- Use `Platform.Function.*` for SFMC-specific functions (e.g. `Platform.Function.Lookup`).',
                                   '- For SOAP API calls, use WSProxy: `var prox = new Script.Util.WSProxy();`',
                                   '- Use `Platform.Response.Write()` to output content.',
+                                  '',
+                                  '## ECMAScript built-ins — verify, never assume',
+                                  'The SFMC engine is missing or breaks many standard JS built-ins. Do **NOT** rely on',
+                                  'your own JavaScript knowledge for what works. For every `Array`/`String`/`Math`/`JSON`/',
+                                  '`Object`/`Date`/`RegExp`/global method or property you intend to use:',
+                                  '- Call the `lookup_ssjs_function` tool first.',
+                                  '- If it reports `supported` → use it as-is.',
+                                  '- If it reports `supported-with-caveat` → respect the caveat; emit the offered polyfill if any.',
+                                  '- If it reports `polyfillable` → paste the returned ES3-safe polyfill source **once**',
+                                  '  (after `Platform.Load`, before first use), then call the method normally.',
+                                  '- If it reports `unsupported` → do not use it; follow the suggested workaround.',
+                                  '- If it reports `unknown` → do not assume it works; pick a catalogued alternative.',
+                                  '',
+                                  '## Documentation & readability — always',
+                                  '- Add a JSDoc block above **every** function/method you write: a one-line description,',
+                                  '  one `@param` line per parameter (wrap the name in `[]` when the parameter is optional,',
+                                  '  e.g. `@param {string} [prefix] - description`) with a description, and a `@returns` line.',
+                                  '- Add a short comment line above each logical block of code explaining what it does.',
                                   '',
                                   `## Task`,
                                   task,
