@@ -73,6 +73,63 @@ const SSJS_ONLY_FUNCTIONS: ReadonlySet<string> = new Set(
 );
 
 // ---------------------------------------------------------------------------
+// Dynamic AMPscript ↔ MCN Handlebars maps (built from ampscript-data at load time)
+// ---------------------------------------------------------------------------
+
+import { FUNCTIONS as AMPSCRIPT_FUNCTIONS } from 'ampscript-data';
+import { getHelper as getHandlebarsHelper } from 'handlebars-data';
+
+/**
+ * Maps an AMPscript function name (lowercase) to the canonical MCN Handlebars
+ * helper name it converts to. Built at module load time from ampscript-data's
+ * `handlebarsEquivalent` field — always in sync with the installed
+ * ampscript-data version, never hand-edited (`mcp-conversion-rules-sync.mdc`).
+ *
+ * Only Category A functions (non-null string `handlebarsEquivalent`) are
+ * included. The stored value is the bare helper name; the canonical casing is
+ * resolved through `handlebars-data` so emitted `{{helper}}` calls match the
+ * catalog exactly.
+ */
+export const AMP_TO_HANDLEBARS: Readonly<Record<string, string>> = Object.fromEntries(
+    AMPSCRIPT_FUNCTIONS.filter(
+        (f) => typeof f.handlebarsEquivalent === 'string' && f.handlebarsEquivalent.length > 0
+    ).map((f) => {
+        const canonical = getHandlebarsHelper(f.handlebarsEquivalent as string);
+        return [
+            f.name.toLowerCase(),
+            canonical ? canonical.name : (f.handlebarsEquivalent as string),
+        ];
+    })
+);
+
+/**
+ * Maps a canonical MCN Handlebars helper name (lowercase) to its AMPscript
+ * function name. Inverted from AMP_TO_HANDLEBARS at module load time. Used by
+ * convertHandlebarsToAmpscript.
+ */
+export const HANDLEBARS_TO_AMP: Readonly<Record<string, string>> = Object.fromEntries(
+    AMPSCRIPT_FUNCTIONS.filter(
+        (f) => typeof f.handlebarsEquivalent === 'string' && f.handlebarsEquivalent.length > 0
+    ).map((f) => {
+        const canonical = getHandlebarsHelper(f.handlebarsEquivalent as string);
+        return [
+            (canonical ? canonical.name : (f.handlebarsEquivalent as string)).toLowerCase(),
+            f.name,
+        ];
+    })
+);
+
+/**
+ * Set of AMPscript function names (lowercase) flagged `mcnHandlebarsGap: true`
+ * in ampscript-data (Category C). These are documented as MCN-supported but
+ * currently fail at runtime and have no Handlebars helper — converting them
+ * must emit a MANUAL_REWRITE marker distinct from Category B (no counterpart).
+ */
+export const AMP_MCN_HANDLEBARS_GAP: ReadonlySet<string> = new Set(
+    AMPSCRIPT_FUNCTIONS.filter((f) => f.mcnHandlebarsGap === true).map((f) => f.name.toLowerCase())
+);
+
+// ---------------------------------------------------------------------------
 // AMP_NATIVE_JS_HINTS: AMPscript-only functions with clean native JS rewrites
 // ---------------------------------------------------------------------------
 
@@ -856,6 +913,368 @@ function ampCondToSsjs(cond: string): string {
  */
 export function stripAmpVars(expr: string): string {
     return expr.replaceAll(/@(\w+)/g, '$1');
+}
+
+// ---------------------------------------------------------------------------
+// AMPscript ↔ MCN Handlebars conversion
+// ---------------------------------------------------------------------------
+
+/**
+ * Distinct MANUAL_REWRITE note for Category C functions (`mcnHandlebarsGap`).
+ * Must be visibly different from the Category B note so consumers can tell a
+ * documented-but-broken function apart from one with no counterpart at all.
+ */
+export const HBS_GAP_NOTE =
+    'documented as supported in Marketing Cloud Next but currently fails at runtime — no Handlebars helper exists yet';
+
+/**
+ * Split a function-argument string into top-level comma-separated arguments,
+ * respecting nested parens/brackets and quoted strings. Returns an empty array
+ * for an empty/whitespace-only string.
+ * @param argsStr - The argument string (contents between the outer parens).
+ * @returns {string[]} Trimmed top-level arguments.
+ */
+function splitArgs(argsStr: string): string[] {
+    if (!argsStr.trim()) return [];
+    const args: string[] = [];
+    let depth = 0;
+    let current = '';
+    let quote: string | null = null;
+    for (const ch of argsStr) {
+        if (quote) {
+            current += ch;
+            if (ch === quote) quote = null;
+            continue;
+        }
+        switch (ch) {
+            case '"':
+            case "'": {
+                quote = ch;
+                current += ch;
+
+                break;
+            }
+            case '(':
+            case '[': {
+                depth++;
+                current += ch;
+
+                break;
+            }
+            case ')':
+            case ']': {
+                depth--;
+                current += ch;
+
+                break;
+            }
+            default: {
+                if (ch === ',' && depth === 0) {
+                    args.push(current.trim());
+                    current = '';
+                } else {
+                    current += ch;
+                }
+            }
+        }
+    }
+    if (current.trim()) args.push(current.trim());
+    return args;
+}
+
+/**
+ * Convert a single AMPscript call argument to its Handlebars form: string and
+ * numeric literals pass through unchanged; `@var` references lose the `@`.
+ * @param arg - A single AMPscript argument.
+ * @returns {string} The Handlebars argument.
+ */
+function ampArgToHbs(arg: string): string {
+    const t = arg.trim();
+    if (/^["']/.test(t)) return t;
+    return stripAmpVars(t);
+}
+
+/**
+ * Convert a single Handlebars argument to its AMPscript form: string/number/
+ * boolean literals pass through; bare identifiers become `@var` references;
+ * dotted paths are returned unchanged (caller decides how to flag them).
+ * @param arg - A single Handlebars argument.
+ * @returns {string} The AMPscript argument.
+ */
+function hbsArgToAmp(arg: string): string {
+    const t = arg.trim();
+    if (/^["']/.test(t)) return t;
+    if (/^-?\d/.test(t)) return t;
+    if (/^(true|false|null)$/i.test(t)) return t;
+    if (t.startsWith('@')) return t;
+    if (/^[A-Za-z_]\w*$/.test(t)) return `@${t}`;
+    return t;
+}
+
+/**
+ * Convert the inner text of a single AMPscript inline expression (`%%=…=%%`)
+ * to Handlebars, classifying function calls by the three conversion categories.
+ * @param inner - The expression between `%%=` and `=%%` (already trimmed).
+ * @param lineNum - Source line number for change/flag tracking.
+ * @param changes - Mutable change log.
+ * @param flaggedSections - Mutable flagged-section log.
+ * @returns {string} The Handlebars replacement string.
+ */
+function convertInlineAmpToHbs(
+    inner: string,
+    lineNum: number,
+    changes: ChangeEntry[],
+    flaggedSections: FlaggedSection[]
+): string {
+    // v(@x) / v(x) → {{x}}
+    const vMatch = /^v\s*\(\s*@?([A-Za-z_]\w*)\s*\)$/i.exec(inner);
+    if (vMatch) {
+        changes.push({ line: lineNum, description: `%%=v(@${vMatch[1]})=%% → {{${vMatch[1]}}}` });
+        return `{{${vMatch[1]}}}`;
+    }
+
+    // Bare @var / var → {{var}}
+    const varMatch = /^@?([A-Za-z_]\w*)$/.exec(inner);
+    if (varMatch) {
+        changes.push({ line: lineNum, description: `%%=${inner}=%% → {{${varMatch[1]}}}` });
+        return `{{${varMatch[1]}}}`;
+    }
+
+    // FunctionName(args)
+    const fnMatch = /^([A-Za-z_]\w*)\s*\(([\s\S]*)\)$/.exec(inner);
+    if (fnMatch) {
+        const fnName = fnMatch[1];
+        const key = fnName.toLowerCase();
+        const hbsArgs = splitArgs(fnMatch[2]).map((a) => ampArgToHbs(a));
+
+        // Category A — mapped helper.
+        const helper = AMP_TO_HANDLEBARS[key];
+        if (helper) {
+            changes.push({
+                line: lineNum,
+                description: `%%=${fnName}(…)=%% → {{${helper} …}}`,
+            });
+            return `{{${helper}${hbsArgs.length > 0 ? ' ' + hbsArgs.join(' ') : ''}}}`;
+        }
+
+        // Category C — mcnHandlebarsGap (distinct note from Category B).
+        if (AMP_MCN_HANDLEBARS_GAP.has(key)) {
+            flaggedSections.push({
+                line: lineNum,
+                code: `%%=${inner}=%%`,
+                reason: `${fnName} is ${HBS_GAP_NOTE}`,
+            });
+            return `{{!-- MANUAL_REWRITE_REQUIRED: ${fnName} is ${HBS_GAP_NOTE} --}}`;
+        }
+
+        // Category B — no Handlebars counterpart.
+        flaggedSections.push({
+            line: lineNum,
+            code: `%%=${inner}=%%`,
+            reason: `AMPscript function '${fnName}' has no Handlebars equivalent`,
+        });
+        return `{{!-- MANUAL_REWRITE_REQUIRED: AMPscript function '${fnName}' has no Handlebars equivalent --}}`;
+    }
+
+    // Anything else (complex expression).
+    flaggedSections.push({
+        line: lineNum,
+        code: `%%=${inner}=%%`,
+        reason: 'complex AMPscript expression has no direct Handlebars form',
+    });
+    return `{{!-- MANUAL_REWRITE_REQUIRED: ${inner} --}}`;
+}
+
+/**
+ * Convert AMPscript to MCN Handlebars using deterministic, data-driven rules.
+ *
+ * Inline expressions (`%%=Fn(args)=%%`, `%%=v(@x)=%%`, `%%var%%`) are mapped via
+ * the three conversion categories built from ampscript-data's
+ * `handlebarsEquivalent` / `mcnHandlebarsGap` fields:
+ * - **A** — mapped helper → `{{helper …}}`
+ * - **B** — no counterpart → `{{!-- MANUAL_REWRITE_REQUIRED … --}}`
+ * - **C** — `mcnHandlebarsGap` → `{{!-- MANUAL_REWRITE_REQUIRED … (distinct note) --}}`
+ *
+ * Procedural AMPscript blocks (`%%[ … ]%%`, `SET`/`VAR`/`IF`/`FOR`) have no
+ * Handlebars counterpart (Handlebars cannot assign variables or run imperative
+ * control flow) and are flagged MANUAL_REWRITE_REQUIRED.
+ * @param code - AMPscript source code (may include HTML context).
+ * @returns {ConversionResult} Converted Handlebars, change log, and flagged sections.
+ */
+export function ampscriptToHandlebars(code: string): ConversionResult {
+    const changes: ChangeEntry[] = [];
+    const flaggedSections: FlaggedSection[] = [];
+    const lines = code.split('\n');
+    const outputLines: string[] = [];
+
+    let inBlock = false;
+    for (const [i, line] of lines.entries()) {
+        const lineNum = i + 1;
+        const trimmed = line.trim();
+
+        // Track multi-line %%[ … ]%% blocks — flag the whole block once.
+        if (inBlock) {
+            if (/\]%%/.test(line)) inBlock = false;
+            continue;
+        }
+        if (/%%\[/.test(line)) {
+            if (!/\]%%/.test(line)) inBlock = true;
+            outputLines.push(
+                '{{!-- MANUAL_REWRITE_REQUIRED: AMPscript block (SET/VAR/IF/FOR) has no Handlebars equivalent — Handlebars cannot assign variables or run imperative control flow --}}'
+            );
+            flaggedSections.push({
+                line: lineNum,
+                code: trimmed.slice(0, 80),
+                reason: 'AMPscript procedural block has no Handlebars counterpart',
+            });
+            continue;
+        }
+
+        // Convert inline expressions on this line.
+        const converted = line
+            .replaceAll(/%%=\s*([\s\S]*?)\s*=%%/g, (_full, raw: string) =>
+                convertInlineAmpToHbs(raw.trim(), lineNum, changes, flaggedSections)
+            )
+            .replaceAll(/%%([A-Za-z_]\w*)%%/g, (_full, v: string) => {
+                changes.push({ line: lineNum, description: `%%${v}%% → {{${v}}}` });
+                return `{{${v}}}`;
+            });
+        outputLines.push(converted);
+    }
+
+    return { convertedCode: outputLines.join('\n'), changes, flaggedSections };
+}
+
+/**
+ * Convert MCN Handlebars to AMPscript using deterministic, data-driven rules.
+ *
+ * Inline helper calls (`{{helper args}}`) whose helper maps back to an AMPscript
+ * function (via HANDLEBARS_TO_AMP) become `%%=Fn(args)=%%`; bare variables
+ * (`{{name}}`) become `%%=v(@name)=%%`. Block helpers (`{{#each}}`…), partials
+ * (`{{> …}}`), dotted binding paths, and unknown helpers are flagged
+ * MANUAL_REWRITE_REQUIRED.
+ * @param code - Handlebars source code (may include HTML context).
+ * @returns {ConversionResult} Converted AMPscript, change log, and flagged sections.
+ */
+export function handlebarsToAmpscript(code: string): ConversionResult {
+    const changes: ChangeEntry[] = [];
+    const flaggedSections: FlaggedSection[] = [];
+    let lineCursor = 1;
+    let lastIndex = 0;
+
+    const convertedCode = code.replaceAll(
+        /\{\{([\s\S]*?)\}\}/g,
+        (full, raw: string, offset: number) => {
+            lineCursor += countNewlines(code.slice(lastIndex, offset));
+            lastIndex = offset;
+            const lineNum = lineCursor;
+            const inner = raw.trim();
+
+            // Comments — preserve as an AMPscript comment.
+            if (inner.startsWith('!')) {
+                return full;
+            }
+
+            // Block helpers / partials / closing tags — no deterministic AMPscript form.
+            if (/^[#/>]/.test(inner)) {
+                flaggedSections.push({
+                    line: lineNum,
+                    code: full,
+                    reason: 'Handlebars block helper / partial has no direct AMPscript equivalent',
+                });
+                return `%%-- MANUAL_REWRITE_REQUIRED: ${full} --%%`;
+            }
+
+            // Strip a leading no-escape ampersand: {{& x}}.
+            const body = inner.replace(/^&\s*/, '');
+
+            // Helper with arguments: {{helper arg1 arg2 …}}
+            const fnMatch = /^([A-Za-z_]\w*)\s+(.+)$/.exec(body);
+            if (fnMatch) {
+                const helperName = fnMatch[1];
+                const key = helperName.toLowerCase();
+                const ampName = HANDLEBARS_TO_AMP[key];
+                const ampArgs = splitArgs(fnMatch[2]).map((a) => hbsArgToAmp(a));
+                if (ampName) {
+                    changes.push({
+                        line: lineNum,
+                        description: `{{${helperName} …}} → %%=${ampName}(…)=%%`,
+                    });
+                    return `%%=${ampName}(${ampArgs.join(', ')})=%%`;
+                }
+                flaggedSections.push({
+                    line: lineNum,
+                    code: full,
+                    reason: `Handlebars helper '${helperName}' has no AMPscript equivalent`,
+                });
+                return `%%-- MANUAL_REWRITE_REQUIRED: Handlebars helper '${helperName}' has no AMPscript equivalent --%%`;
+            }
+
+            // Bare single identifier: {{name}} → %%=v(@name)=%%
+            const bareMatch = /^([A-Za-z_]\w*)$/.exec(body);
+            if (bareMatch) {
+                changes.push({
+                    line: lineNum,
+                    description: `{{${bareMatch[1]}}} → %%=v(@${bareMatch[1]})=%%`,
+                });
+                return `%%=v(@${bareMatch[1]})=%%`;
+            }
+
+            // Dotted binding path or other expression — context-specific.
+            flaggedSections.push({
+                line: lineNum,
+                code: full,
+                reason: 'Handlebars binding path requires context-specific AMPscript mapping',
+            });
+            return `%%-- MANUAL_REWRITE_REQUIRED: ${full} --%%`;
+        }
+    );
+
+    return { convertedCode, changes, flaggedSections };
+}
+
+/**
+ * Count newline characters in a string (helper for line tracking in
+ * handlebarsToAmpscript).
+ * @param s - Input string.
+ * @returns {number} Number of `\n` characters.
+ */
+function countNewlines(s: string): number {
+    let n = 0;
+    for (const ch of s) {
+        if (ch === '\n') n++;
+    }
+    return n;
+}
+
+/**
+ * Convert SSJS to MCN Handlebars deterministically via a two-step chain:
+ * SSJS → AMPscript (`ssjsToAmpscript`) → Handlebars (`ampscriptToHandlebars`).
+ *
+ * Because Handlebars is declarative, most imperative SSJS has no Handlebars
+ * counterpart and is conservatively flagged MANUAL_REWRITE_REQUIRED; inline
+ * `Platform.Function.X(…)` calls that map through AMPscript to a Handlebars
+ * helper are converted.
+ * @param code - SSJS source code (may include `<script runat="server">` tags).
+ * @returns {ConversionResult} Converted Handlebars, combined change log, and flagged sections.
+ */
+export function ssjsToHandlebars(code: string): ConversionResult {
+    const toAmp = ssjsToAmpscript(code);
+    const toHbs = ampscriptToHandlebars(toAmp.convertedCode);
+    return {
+        convertedCode: toHbs.convertedCode,
+        changes: [
+            ...toAmp.changes.map((c) => ({
+                line: c.line,
+                description: `[SSJS→AMPscript] ${c.description}`,
+            })),
+            ...toHbs.changes.map((c) => ({
+                line: c.line,
+                description: `[AMPscript→Handlebars] ${c.description}`,
+            })),
+        ],
+        flaggedSections: [...toAmp.flaggedSections, ...toHbs.flaggedSections],
+    };
 }
 
 // ---------------------------------------------------------------------------
