@@ -24,6 +24,7 @@ import {
     getMcnNotes,
     extractAmpscriptFunctionCalls,
     type SfmcSettings,
+    type HandlebarsHelper,
 } from 'sfmc-language-lsp';
 import {
     getChunks,
@@ -39,6 +40,11 @@ import {
     ampscriptToSsjs,
     rewriteAmpForMcn,
     isSsjsBlockConvertible,
+    ampscriptToHandlebars,
+    handlebarsToAmpscript,
+    ssjsToHandlebars,
+    AMP_MCN_HANDLEBARS_GAP,
+    HBS_GAP_NOTE,
 } from './conversion-rules.js';
 import {
     ECMASCRIPT_BUILTINS,
@@ -163,6 +169,33 @@ function formatDiagnostics(diagnostics: ReturnType<typeof validateAmpscript>): s
             return `[${sev}] ${loc}: ${message}`;
         })
         .join('\n');
+}
+
+function formatHandlebarsHelper(helper: HandlebarsHelper): string {
+    const params = helper.params
+        .map((p) => {
+            const req = p.optional ? '(optional)' : '(required)';
+            const variadic = p.variadic ? ' (variadic)' : '';
+            return `  - ${p.name}: ${p.type}${variadic} ${req}${p.description ? ' — ' + p.description : ''}`;
+        })
+        .join('\n');
+
+    const subexpr = helper.subexpressionOnly
+        ? '\n\n> Subexpression-only — may only be used inside `( … )`.'
+        : '';
+
+    return (
+        `## {{${helper.name}}}\n\n` +
+        `**Category:** ${helper.category}\n\n` +
+        `**Origin:** ${helper.origin}\n\n` +
+        `**Type:** ${helper.helperType}\n\n` +
+        `**Returns:** ${helper.returnType}\n\n` +
+        `**Description:** ${helper.description}\n\n` +
+        `**Parameters:**\n${params || '  (none)'}` +
+        subexpr +
+        `\n\n✅ **Marketing Cloud Next:** Supported since API v${helper.mcnSince}.0` +
+        (helper.docUrl ? `\n\n[Documentation](${helper.docUrl})` : '')
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -399,6 +432,122 @@ server.tool(
                 {
                     type: 'text',
                     text: `## AMPscript Functions ${platformHeader}\n\n${rows}${legend}`,
+                },
+            ],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: validate_handlebars
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'validate_handlebars',
+    'Validate Marketing Cloud Next (MCN) Handlebars template code. ' +
+        'Checks helper names, arity, block balance, and flags unsupported constructs ' +
+        '(partials, decorators, and built-in helpers absent from the locked-down MCN engine). ' +
+        'MCN Handlebars lives inside the combined sfmc language and is always validated for the ' +
+        "'next' target.",
+    {
+        code: z
+            .string()
+            .describe('The MCN Handlebars template code to validate. May include HTML context.'),
+        maxProblems: z
+            .number()
+            .int()
+            .min(1)
+            .max(500)
+            .optional()
+            .describe('Maximum number of problems to return (default 100).'),
+    },
+    ({ code, maxProblems }) => {
+        const settings: SfmcSettings = {
+            maxNumberOfProblems: maxProblems ?? 100,
+            targetPlatform: 'next',
+        };
+        const diagnostics = validateAmpscript(code, settings).filter(
+            (d) => d.source === 'handlebars'
+        );
+        return {
+            content: [{ type: 'text', text: formatDiagnostics(diagnostics) }],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: lookup_handlebars_helper
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'lookup_handlebars_helper',
+    'Look up the signature, parameters, description, and origin for a Marketing Cloud Next ' +
+        'Handlebars helper by name. Case-insensitive. Returns null if the helper is not found.',
+    {
+        name: z
+            .string()
+            .describe('The Handlebars helper name, e.g. "uppercase", "if", "formatDate".'),
+    },
+    ({ name }) => {
+        const helper = sfmcLanguageService.lookupHandlebarsHelper(name);
+        if (!helper) {
+            return {
+                content: [{ type: 'text', text: `Handlebars helper "${name}" not found.` }],
+            };
+        }
+        return { content: [{ type: 'text', text: formatHandlebarsHelper(helper) }] };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: list_handlebars_helpers
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'list_handlebars_helpers',
+    'List all Marketing Cloud Next Handlebars helpers, optionally filtered by category ' +
+        'and/or origin (handlebars-builtin, mcn-helper, mcn-platform).',
+    {
+        category: z
+            .string()
+            .optional()
+            .describe(
+                'Filter by helper category (case-insensitive substring match), e.g. "string", "date", "comparison".'
+            ),
+        origin: z
+            .enum(['handlebars-builtin', 'mcn-helper', 'mcn-platform'])
+            .optional()
+            .describe('Filter by helper origin.'),
+    },
+    ({ category, origin }) => {
+        let helpers = sfmcLanguageService.listHandlebarsHelpers();
+
+        if (origin) {
+            helpers = helpers.filter((h) => h.origin === origin);
+        }
+        if (category) {
+            const catLower = category.toLowerCase();
+            helpers = helpers.filter((h) => h.category.toLowerCase().includes(catLower));
+        }
+
+        if (helpers.length === 0) {
+            return {
+                content: [{ type: 'text', text: 'No Handlebars helpers match the filter.' }],
+            };
+        }
+
+        const rows = helpers
+            .map(
+                (h) =>
+                    `- **${h.name}** *(${h.category}, ${h.origin}, ${h.helperType})*: ${h.description}`
+            )
+            .join('\n');
+
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `## MCN Handlebars Helpers\n\n${rows}`,
                 },
             ],
         };
@@ -770,6 +919,24 @@ server.tool(
  */
 function getFixSuggestion(message: string, line: string, lang: 'ampscript' | 'ssjs'): string {
     const m = message.toLowerCase();
+    // MCN Handlebars diagnostics (surfaced when target === 'next' on {{…}} regions).
+    if (m.includes('partials ({{>'))
+        return 'Inline the partial content directly — the locked-down MCN engine cannot register partials.';
+    if (m.includes('partial blocks'))
+        return 'Inline the block content directly — the MCN engine cannot register partial blocks.';
+    if (m.includes('decorators ({{*') || m.includes('decorator blocks'))
+        return 'Remove the decorator — the MCN engine cannot register decorators.';
+    if (m.includes('{{log}}'))
+        return 'Remove the {{log}} debugging helper — it is not available in MCN Handlebars.';
+    if (m.includes('unknown handlebars helper')) {
+        const helperMatch = message.match(/'([^']+)'/);
+        const hint = helperMatch
+            ? ` Check spelling or use a catalog helper instead of "${helperMatch[1]}".`
+            : '';
+        return `Use a helper from the MCN Handlebars catalog (list_handlebars_helpers); custom helpers cannot be registered.${hint}`;
+    }
+    if (m.includes('handlebars for marketing cloud next') || m.includes('mcn engine'))
+        return 'Replace with a supported MCN Handlebars construct — see list_handlebars_helpers.';
     if (m.includes("'let'") || m.includes("'const'")) return 'Replace `let`/`const` with `var`.';
     if (m.includes('arrow function')) return 'Replace `() =>` with `function() {}`.';
     if (m.includes('template literal')) return 'Replace `` `${x}` `` with `"" + x + ""`.';
@@ -922,16 +1089,98 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
-// Tool: format_sfmc_code (basic, no prettier integration needed)
+// Tool: get_handlebars_completions
 // ---------------------------------------------------------------------------
 
 server.tool(
+    'get_handlebars_completions',
+    'Return Marketing Cloud Next (MCN) Handlebars helper completions with snippet insert text. ' +
+        'MCN Handlebars is only available on the next platform, so this catalog is always the ' +
+        '\'next\' set. Optionally filter by a name prefix (e.g. "form", "date").',
+    {
+        filter: z
+            .string()
+            .optional()
+            .describe('Optional helper-name prefix filter (case-insensitive), e.g. "form", "to".'),
+    },
+    ({ filter }) => {
+        const items = sfmcLanguageService.getHandlebarsCompletionCatalog();
+        const filtered = filter
+            ? items.filter((item) => {
+                  const label =
+                      typeof item.label === 'string'
+                          ? item.label
+                          : (item.label as { label: string }).label;
+                  return label.toLowerCase().startsWith(filter.toLowerCase());
+              })
+            : items;
+
+        const formatted = filtered
+            .slice(0, 80)
+            .map((item) => {
+                const label =
+                    typeof item.label === 'string'
+                        ? item.label
+                        : (item.label as { label: string }).label;
+                return `- ${label}${item.detail ? ` — ${item.detail}` : ''}`;
+            })
+            .join('\n');
+
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text:
+                        filtered.length === 0
+                            ? `No MCN Handlebars helpers matching "${filter}".`
+                            : `${filtered.length} MCN Handlebars helper completions${filter ? ` matching "${filter}"` : ''} (showing up to 80):\n\n${formatted}`,
+                },
+            ],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: format_sfmc_code (basic, no prettier integration needed)
+// ---------------------------------------------------------------------------
+
+/**
+ * Conservatively normalize whitespace inside Marketing Cloud Next (MCN)
+ * Handlebars `{{…}}` mustaches: collapse runs of internal whitespace to a
+ * single space and trim the edges (e.g. `{{ foo   bar }}` → `{{foo bar}}`),
+ * matching what Prettier's Glimmer parser does for mustache interiors.
+ *
+ * Hard guardrails (never altered):
+ * - `{!$…}` merge-field bindings — they are not Handlebars syntax.
+ * - `{{!-- … --}}` / `{{! … }}` comments — preserved byte-for-byte.
+ *
+ * This is the deferred-Prettier stub for item 8 of the MCN Handlebars handoff:
+ * full routing through prettier-plugin-sfmc's Glimmer path lands once that
+ * plugin ships Handlebars support (see HANDOFF-prettier-handlebars.md).
+ * @param {string} code - The Handlebars-in-HTML code to normalize.
+ * @returns {string} The code with mustache interiors normalized.
+ */
+function normalizeHandlebarsWhitespace(code: string): string {
+    return code.replaceAll(/\{\{([\s\S]*?)\}\}/g, (full, inner: string) => {
+        // Preserve comments verbatim.
+        if (inner.startsWith('!')) {
+            return full;
+        }
+        const normalized = inner.replaceAll(/\s+/g, ' ').trim();
+        return `{{${normalized}}}`;
+    });
+}
+
+server.tool(
     'format_sfmc_code',
-    'Apply basic formatting conventions to AMPscript or SSJS code. ' +
-        'Normalises keyword casing, whitespace around operators, and indentation hints.',
+    'Apply basic formatting conventions to AMPscript, SSJS, or Marketing Cloud Next (MCN) ' +
+        'Handlebars code. Normalises keyword casing and whitespace. For Handlebars, collapses ' +
+        'whitespace inside {{…}} mustaches while leaving {!$…} bindings and {{!-- … --}} comments ' +
+        'untouched. (Handlebars formatting is a conservative whitespace normalizer; full Prettier ' +
+        'Glimmer routing is deferred until prettier-plugin-sfmc ships Handlebars support.)',
     {
         code: z.string().describe('The SFMC code to format.'),
-        language: z.enum(['ampscript', 'ssjs']).describe('The language of the code.'),
+        language: z.enum(['ampscript', 'ssjs', 'handlebars']).describe('The language of the code.'),
     },
     ({ code, language }) => {
         let formatted = code;
@@ -946,6 +1195,8 @@ server.tool(
                 .replaceAll(/\bAND\b/gi, 'AND')
                 .replaceAll(/\bOR\b/gi, 'OR')
                 .replaceAll(/\bNOT\b/gi, 'NOT');
+        } else if (language === 'handlebars') {
+            formatted = normalizeHandlebarsWhitespace(formatted);
         } else {
             // SSJS: normalise Platform.Load to use double quotes
             formatted = formatted.replaceAll(
@@ -1079,6 +1330,56 @@ server.resource('ssjs-function-catalog', 'sfmc://ssjs/functions', async () => {
                 mimeType: 'text/plain',
                 text:
                     `# SSJS Function Catalog (${functions.length} functions)\n\n` +
+                    lines.join('\n'),
+            },
+        ],
+    };
+});
+
+// ---------------------------------------------------------------------------
+// Resource: handlebars-helper-catalog
+// ---------------------------------------------------------------------------
+
+server.resource('handlebars-helper-catalog', 'sfmc://handlebars/helpers', async () => {
+    const helpers = sfmcLanguageService.listHandlebarsHelpers();
+    const lines = helpers.map((h) => {
+        const paramList = h.params
+            .map((p) => {
+                const inner = `${p.name}: ${p.type}`;
+                return p.optional ? `[${inner}]` : inner;
+            })
+            .join(', ');
+        return `{{${h.name} ${paramList}}} — (${h.category}, ${h.origin}, v${h.mcnSince}.0+) ${h.description}`;
+    });
+    return {
+        contents: [
+            {
+                uri: 'sfmc://handlebars/helpers',
+                mimeType: 'text/plain',
+                text:
+                    `# MCN Handlebars Helper Catalog (${helpers.length} helpers)\n\n` +
+                    lines.join('\n'),
+            },
+        ],
+    };
+});
+
+// ---------------------------------------------------------------------------
+// Resource: handlebars-binding-catalog
+// ---------------------------------------------------------------------------
+
+server.resource('handlebars-binding-catalog', 'sfmc://handlebars/bindings', async () => {
+    const bindings = sfmcLanguageService.listHandlebarsBindings();
+    const lines = bindings.map(
+        (b) => `${b.token} — (${b.namespace}, v${b.mcnSince}.0+) ${b.description}`
+    );
+    return {
+        contents: [
+            {
+                uri: 'sfmc://handlebars/bindings',
+                mimeType: 'text/plain',
+                text:
+                    `# MCN Handlebars Built-in Binding Catalog (${bindings.length} bindings)\n\n` +
                     lines.join('\n'),
             },
         ],
@@ -1801,11 +2102,25 @@ server.tool(
             reason: string;
         }
 
+        interface HandlebarsProblemEntry {
+            line: number;
+            severity: 'error' | 'warning' | 'info';
+            message: string;
+        }
+
+        interface HandlebarsHelperUsage {
+            name: string;
+            line: number;
+            mcnSince: number;
+        }
+
         interface FileResult {
             filename: string;
             difficulty: FileDifficulty;
             ampFunctions: AmpFunctionEntry[];
             ssjsBlocks: SsjsBlockEntry[];
+            handlebarsProblems: HandlebarsProblemEntry[];
+            handlebarsHelpers: HandlebarsHelperUsage[];
         }
 
         const results: FileResult[] = [];
@@ -1822,7 +2137,15 @@ server.tool(
                 let status: AmpFunctionStatus;
                 let reason: string;
 
-                if (mcnSince !== null && notes === null) {
+                const isHbsGap = AMP_MCN_HANDLEBARS_GAP.has(site.name.toLowerCase());
+
+                if (isHbsGap) {
+                    // Category C: documented as MCN-supported but no working Handlebars
+                    // helper exists yet — fails at runtime. Always needs-review, even when
+                    // mcnSince is set, because the data flags a runtime gap.
+                    status = 'needs-review';
+                    reason = `${site.name}() is ${HBS_GAP_NOTE}`;
+                } else if (mcnSince !== null && notes === null) {
                     status = 'supported';
                     reason = '—';
                 } else if (mcnSince !== null && notes !== null) {
@@ -1877,6 +2200,50 @@ server.tool(
                 }
             }
 
+            // 2b. Analyze MCN Handlebars regions (only meaningful for the 'next' target).
+            // Diagnostics flag unsupported constructs (partials, decorators, built-in
+            // helpers absent from the locked-down engine), unknown helpers, and arity.
+            const handlebarsProblems: HandlebarsProblemEntry[] = [];
+            const handlebarsHelpers: HandlebarsHelperUsage[] = [];
+            if (content.includes('{{')) {
+                const hbsDiagnostics = validateAmpscript(content, {
+                    maxNumberOfProblems: 200,
+                    targetPlatform: 'next',
+                }).filter((d) => d.source === 'handlebars');
+
+                for (const d of hbsDiagnostics) {
+                    const severity =
+                        d.severity === 1 ? 'error' : d.severity === 2 ? 'warning' : 'info';
+                    const message = typeof d.message === 'string' ? d.message : d.message.value;
+                    handlebarsProblems.push({
+                        line: d.range.start.line + 1,
+                        severity,
+                        message,
+                    });
+                }
+
+                // Report recognized helper usages with their MCN availability version.
+                // Helper names are matched against handlebars-data via the LSP lookup so
+                // this stays data-driven (no hand-maintained helper list).
+                const helperCallPattern = /\{\{[#/]?\s*([a-zA-Z][\w-]*)/g;
+                const seenHelper = new Set<string>();
+                let helperMatch: RegExpExecArray | null;
+                while ((helperMatch = helperCallPattern.exec(content)) !== null) {
+                    const token = helperMatch[1];
+                    const helper = sfmcLanguageService.lookupHandlebarsHelper(token);
+                    if (!helper) {
+                        continue;
+                    }
+                    const line = content.slice(0, helperMatch.index).split('\n').length;
+                    const dedupeKey = `${helper.name}@${line}`;
+                    if (seenHelper.has(dedupeKey)) {
+                        continue;
+                    }
+                    seenHelper.add(dedupeKey);
+                    handlebarsHelpers.push({ name: helper.name, line, mcnSince: helper.mcnSince });
+                }
+            }
+
             // 3. Assess per-file difficulty
             const hasCloudPagesFn = ampFunctions.some(
                 (f) =>
@@ -1891,19 +2258,28 @@ server.tool(
             );
             const hasConvertibleSsjs = ssjsBlocks.some((b) => b.status === 'needs-conversion');
             const hasNeedsReview = ampFunctions.some((f) => f.status === 'needs-review');
+            const hasHandlebarsError = handlebarsProblems.some((p) => p.severity === 'error');
+            const hasHandlebarsWarning = handlebarsProblems.some((p) => p.severity === 'warning');
 
             let difficulty: FileDifficulty;
             if (hasCloudPagesFn || hasNotMigratableSsjs) {
                 difficulty = 'not-migratable';
-            } else if (hasUnsupportedAmp || hasConvertibleSsjs) {
+            } else if (hasUnsupportedAmp || hasConvertibleSsjs || hasHandlebarsError) {
                 difficulty = 'significant';
-            } else if (hasNeedsReview) {
+            } else if (hasNeedsReview || hasHandlebarsWarning) {
                 difficulty = 'minor';
             } else {
                 difficulty = 'ready';
             }
 
-            results.push({ filename, difficulty, ampFunctions, ssjsBlocks });
+            results.push({
+                filename,
+                difficulty,
+                ampFunctions,
+                ssjsBlocks,
+                handlebarsProblems,
+                handlebarsHelpers,
+            });
         }
 
         // 4. Build Markdown report
@@ -1982,8 +2358,30 @@ server.tool(
                         `| ${fn.name} | ${fn.line} | ${icon} ${statusLabel} | ${fn.reason} |`
                     );
                 }
-            } else if (result.ssjsBlocks.length === 0) {
-                fileLines.push('*No AMPscript functions or SSJS blocks found.*');
+            } else if (
+                result.ssjsBlocks.length === 0 &&
+                result.handlebarsProblems.length === 0 &&
+                result.handlebarsHelpers.length === 0
+            ) {
+                fileLines.push('*No AMPscript functions, SSJS blocks, or Handlebars found.*');
+            }
+
+            if (result.handlebarsHelpers.length > 0) {
+                fileLines.push('', '**MCN Handlebars Helpers:**', '');
+                for (const h of result.handlebarsHelpers) {
+                    fileLines.push(
+                        `✅ \`{{${h.name}}}\` (line ${h.line}): Supported since API v${h.mcnSince}.0`
+                    );
+                }
+            }
+
+            if (result.handlebarsProblems.length > 0) {
+                fileLines.push('', '**MCN Handlebars Problems:**', '');
+                for (const p of result.handlebarsProblems) {
+                    const icon =
+                        p.severity === 'error' ? '❌' : p.severity === 'warning' ? '⚠️' : 'ℹ️';
+                    fileLines.push(`${icon} Line ${p.line}: ${p.message}`);
+                }
             }
 
             fileLines.push('', '---');
@@ -2285,6 +2683,339 @@ server.tool(
             ],
         };
     }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: convertAmpscriptToHandlebars
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'convertAmpscriptToHandlebars',
+    'Deterministically convert AMPscript to Marketing Cloud Next (MCN) Handlebars using the ' +
+        'three-category model built from ampscript-data: (A) functions with a Handlebars helper ' +
+        'equivalent become {{helper …}}; (B) functions with no MCN counterpart become a ' +
+        'MANUAL_REWRITE_REQUIRED comment; (C) mcnHandlebarsGap functions (e.g. ContentBlockByKey) ' +
+        'become a DISTINCT MANUAL_REWRITE_REQUIRED comment noting they are documented as ' +
+        'MCN-supported but currently fail at runtime. Procedural AMPscript blocks (SET/VAR/IF/FOR) ' +
+        'have no Handlebars equivalent and are flagged. ' +
+        'Use the convertAmpscriptToHandlebars PROMPT for AI-enhanced handling of flagged sections.',
+    {
+        code: z.string().describe('The AMPscript code to convert to MCN Handlebars.'),
+    },
+    ({ code }) => {
+        const result = ampscriptToHandlebars(code);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(
+                        {
+                            convertedCode: result.convertedCode,
+                            changes: result.changes,
+                            flaggedSections: result.flaggedSections,
+                        },
+                        null,
+                        2
+                    ),
+                },
+            ],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Prompt: convertAmpscriptToHandlebars
+// ---------------------------------------------------------------------------
+
+server.prompt(
+    'convertAmpscriptToHandlebars',
+    'Convert AMPscript to Marketing Cloud Next (MCN) Handlebars. ' +
+        'Calls the convertAmpscriptToHandlebars tool first for a deterministic, data-driven ' +
+        'conversion, then applies AI reasoning to handle MANUAL_REWRITE_REQUIRED sections.',
+    {
+        code: z.string().describe('The AMPscript code to convert to MCN Handlebars.'),
+    },
+    ({ code }) => ({
+        messages: [
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: [
+                        'You are an expert Salesforce Marketing Cloud developer converting AMPscript to Marketing Cloud Next (MCN) Handlebars.',
+                        '',
+                        '## Instructions',
+                        '1. Call the `convertAmpscriptToHandlebars` **tool** with the code below to get a deterministic conversion.',
+                        '2. Review the `flaggedSections` — these are constructs the tool could not convert automatically.',
+                        '3. For each flagged section, apply your expertise, but obey these hard rules:',
+                        '   - NEVER invent a Handlebars helper. Only use helpers that exist in the MCN catalog (call `list_handlebars_helpers` / `lookup_handlebars_helper`).',
+                        '   - Category B (no MCN counterpart): leave a clear `{{!-- MANUAL_REWRITE_REQUIRED … --}}` note explaining the manual step.',
+                        '   - Category C (documented-supported but runtime gap, e.g. ContentBlockByKey): keep the DISTINCT runtime-gap note — do not replace it with a fabricated helper.',
+                        '   - AMPscript procedural blocks (SET/VAR/IF/FOR) have no Handlebars equivalent — Handlebars cannot assign variables or run imperative logic. Restructure the data upstream instead.',
+                        '4. Validate your final output by calling `validate_handlebars`.',
+                        '5. Produce a single final Handlebars-in-HTML code block plus a short bulleted change log.',
+                        '',
+                        '## AMPscript code to convert',
+                        '```',
+                        code,
+                        '```',
+                    ].join('\n'),
+                },
+            },
+        ],
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Tool: convertHandlebarsToAmpscript
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'convertHandlebarsToAmpscript',
+    'Deterministically convert Marketing Cloud Next (MCN) Handlebars to AMPscript (best-effort, ' +
+        'lossy). Inline helper calls that map back to an AMPscript function become %%=Fn(…)=%%; ' +
+        'bare variables {{name}} become %%=v(@name)=%%. Block helpers ({{#each}}/{{#if}}), partials, ' +
+        'dotted binding paths, and helpers with no AMPscript equivalent are flagged ' +
+        'MANUAL_REWRITE_REQUIRED. Use the convertHandlebarsToAmpscript PROMPT for AI-enhanced handling.',
+    {
+        code: z.string().describe('The MCN Handlebars code to convert to AMPscript.'),
+    },
+    ({ code }) => {
+        const result = handlebarsToAmpscript(code);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(
+                        {
+                            convertedCode: result.convertedCode,
+                            changes: result.changes,
+                            flaggedSections: result.flaggedSections,
+                        },
+                        null,
+                        2
+                    ),
+                },
+            ],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Prompt: convertHandlebarsToAmpscript
+// ---------------------------------------------------------------------------
+
+server.prompt(
+    'convertHandlebarsToAmpscript',
+    'Convert Marketing Cloud Next (MCN) Handlebars to AMPscript (best-effort, lossy). ' +
+        'Calls the convertHandlebarsToAmpscript tool first for a deterministic conversion, then ' +
+        'applies AI reasoning to handle MANUAL_REWRITE_REQUIRED sections.',
+    {
+        code: z.string().describe('The MCN Handlebars code to convert to AMPscript.'),
+    },
+    ({ code }) => ({
+        messages: [
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: [
+                        'You are an expert Salesforce Marketing Cloud developer converting MCN Handlebars to AMPscript.',
+                        '',
+                        '## Instructions',
+                        '1. Call the `convertHandlebarsToAmpscript` **tool** with the code below to get a deterministic conversion.',
+                        '2. Review the `flaggedSections` — block helpers, partials, and binding paths often need context-specific AMPscript.',
+                        '3. For each flagged section, apply your expertise:',
+                        '   - `{{#each items}}…{{/each}}` → AMPscript `FOR @i = 1 TO RowCount(@items) DO … NEXT @i`',
+                        '   - `{{#if cond}}…{{else}}…{{/if}}` → `IF cond THEN … ELSE … ENDIF`',
+                        '   - `{!$…}` bindings and `mcn-platform` helpers may have no AMPscript equivalent — keep the MANUAL_REWRITE_REQUIRED note.',
+                        '4. Produce a single final AMPscript code block plus a short bulleted change log.',
+                        '',
+                        '## Handlebars code to convert',
+                        '```',
+                        code,
+                        '```',
+                    ].join('\n'),
+                },
+            },
+        ],
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Tool: convertSsjsToHandlebars
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'convertSsjsToHandlebars',
+    'Deterministically convert SSJS to Marketing Cloud Next (MCN) Handlebars transitively ' +
+        '(SSJS → AMPscript → Handlebars). Because Handlebars is declarative, most imperative SSJS ' +
+        'has no Handlebars counterpart and is conservatively flagged MANUAL_REWRITE_REQUIRED; ' +
+        'inline Platform.Function.* calls that map through AMPscript to a Handlebars helper are ' +
+        'converted. Use the convertSsjsToHandlebars PROMPT for AI-enhanced handling of flagged sections.',
+    {
+        code: z
+            .string()
+            .describe('The SSJS code to convert (may include <script runat="server"> tags).'),
+    },
+    ({ code }) => {
+        const result = ssjsToHandlebars(code);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(
+                        {
+                            convertedCode: result.convertedCode,
+                            changes: result.changes,
+                            flaggedSections: result.flaggedSections,
+                        },
+                        null,
+                        2
+                    ),
+                },
+            ],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Prompt: convertSsjsToHandlebars
+// ---------------------------------------------------------------------------
+
+server.prompt(
+    'convertSsjsToHandlebars',
+    'Convert SSJS to Marketing Cloud Next (MCN) Handlebars. Calls the convertSsjsToHandlebars ' +
+        'tool first (SSJS → AMPscript → Handlebars), then applies AI reasoning to handle the many ' +
+        'MANUAL_REWRITE_REQUIRED sections that imperative SSJS produces.',
+    {
+        code: z.string().describe('The SSJS code to convert to MCN Handlebars.'),
+    },
+    ({ code }) => ({
+        messages: [
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: [
+                        'You are an expert Salesforce Marketing Cloud developer converting SSJS to Marketing Cloud Next (MCN) Handlebars.',
+                        '',
+                        '## Key reality',
+                        'MCN runs a locked-down Handlebars engine. SSJS does NOT exist in MCN, and Handlebars is declarative — it cannot run imperative logic. Conversion is only possible transitively (SSJS → MCN-valid AMPscript subset → Handlebars), and most non-trivial SSJS will need a redesign (move logic to the data layer / a query).',
+                        '',
+                        '## Instructions',
+                        '1. Call the `convertSsjsToHandlebars` **tool** with the code below to get a deterministic conversion.',
+                        '2. Review the `flaggedSections` from BOTH stages ([SSJS→AMPscript] and [AMPscript→Handlebars]).',
+                        '3. For each flagged section, apply your expertise — but NEVER invent a Handlebars helper (use only the MCN catalog via `list_handlebars_helpers`).',
+                        '4. Where imperative logic cannot be expressed, recommend moving it upstream (e.g. a `{{#query}}` / data binding) and keep a clear MANUAL_REWRITE_REQUIRED note.',
+                        '5. Validate your final output by calling `validate_handlebars`.',
+                        '6. Produce a single final Handlebars-in-HTML code block plus a short bulleted change log.',
+                        '',
+                        '## SSJS code to convert',
+                        '```javascript',
+                        code,
+                        '```',
+                    ].join('\n'),
+                },
+            },
+        ],
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Tool: write_handlebars
+// ---------------------------------------------------------------------------
+
+server.tool(
+    'write_handlebars',
+    'Validate a Marketing Cloud Next (MCN) Handlebars-in-HTML draft so it can be finalized as ' +
+        'authored content. Runs the MCN Handlebars validator (locked-down engine) on the draft and ' +
+        'returns whether it is clean, plus any diagnostics (unknown/too-new helpers, unsupported ' +
+        'constructs, arity). Use the write_handlebars PROMPT to AUTHOR from intent — that prompt ' +
+        'instructs the model to use only catalog helpers and then call this tool to verify.',
+    {
+        draft: z.string().describe('The Handlebars-in-HTML draft to validate before finalizing.'),
+        intent: z
+            .string()
+            .optional()
+            .describe(
+                'Optional human description of what the content should do (echoed for context).'
+            ),
+    },
+    ({ draft, intent }) => {
+        const diagnostics = validateAmpscript(draft, {
+            maxNumberOfProblems: 100,
+            targetPlatform: 'next',
+        }).filter((d) => d.source === 'handlebars');
+
+        const isClean = diagnostics.length === 0;
+        const header = isClean
+            ? '✅ Draft is valid MCN Handlebars.'
+            : `❌ Draft has ${diagnostics.length} MCN Handlebars issue(s) — fix before finalizing:`;
+        const intentLine = intent ? `Intent: ${intent}\n\n` : '';
+
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `${intentLine}${header}\n\n${formatDiagnostics(diagnostics)}`,
+                },
+            ],
+        };
+    }
+);
+
+// ---------------------------------------------------------------------------
+// Prompt: writeHandlebars
+// ---------------------------------------------------------------------------
+
+server.prompt(
+    'writeHandlebars',
+    'Author Marketing Cloud Next (MCN) Handlebars-in-HTML from a natural-language intent, using ' +
+        'only helpers that exist in the MCN catalog, then validate the result with write_handlebars.',
+    {
+        intent: z
+            .string()
+            .describe(
+                'What the content should do, e.g. "greet the subscriber by first name and show their loyalty tier".'
+            ),
+        context: z
+            .string()
+            .optional()
+            .describe(
+                'Optional data/personalization context (available fields, bindings, sample data).'
+            ),
+    },
+    ({ intent, context }) => ({
+        messages: [
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: [
+                        'You are an expert Salesforce Marketing Cloud developer authoring Marketing Cloud Next (MCN) Handlebars-in-HTML.',
+                        '',
+                        '## Hard rules',
+                        '- MCN runs a LOCKED-DOWN Handlebars engine. NEVER invent a helper. Only use helpers in the MCN catalog — call `list_handlebars_helpers` (and `lookup_handlebars_helper` for signatures) before writing.',
+                        '- Respect each helper`s `mcnSince` availability.',
+                        '- Partials ({{> …}}), decorators ({{* …}}), and built-in helpers absent from MCN (e.g. {{log}}) are NOT allowed.',
+                        '- `{!$…}` bindings are merge fields, not helpers — use `list_handlebars_helpers` output / bindings catalog for valid ones.',
+                        '',
+                        '## Instructions',
+                        '1. Inspect the available catalog with `list_handlebars_helpers`.',
+                        '2. Author the Handlebars-in-HTML to satisfy the intent below.',
+                        '3. Call the `write_handlebars` **tool** with your draft to validate it.',
+                        '4. If validation reports issues, fix them and re-validate until clean.',
+                        '5. Return the final, validated Handlebars-in-HTML code block.',
+                        '',
+                        `## Intent`,
+                        intent,
+                        ...(context ? ['', '## Context', context] : []),
+                    ].join('\n'),
+                },
+            },
+        ],
+    })
 );
 
 // ---------------------------------------------------------------------------

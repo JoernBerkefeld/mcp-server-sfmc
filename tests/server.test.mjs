@@ -35,8 +35,17 @@ import {
     ampscriptToSsjs,
     rewriteAmpForMcn,
     isSsjsBlockConvertible,
+    AMP_TO_HANDLEBARS,
+    HANDLEBARS_TO_AMP,
+    AMP_MCN_HANDLEBARS_GAP,
+    HBS_GAP_NOTE,
+    ampscriptToHandlebars,
+    handlebarsToAmpscript,
+    ssjsToHandlebars,
 } from '../dist/conversion-rules.js';
 import { PLATFORM_FUNCTIONS } from 'ssjs-data';
+import { FUNCTIONS as AMPSCRIPT_FUNCTIONS } from 'ampscript-data';
+import { getHelper as getHandlebarsHelper } from 'handlebars-data';
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(testsDir, '..');
@@ -1322,5 +1331,309 @@ describe('MCP Registry manifest', () => {
             server.description.length <= 100,
             `server.json description is ${server.description.length} chars (max 100)`
         );
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Handlebars data-driven maps (AMP ↔ MCN Handlebars)
+// ---------------------------------------------------------------------------
+
+describe('Handlebars conversion maps (data-driven)', () => {
+    test('AMP_TO_HANDLEBARS only contains AMP functions with a non-null handlebarsEquivalent', () => {
+        const expectedKeys = AMPSCRIPT_FUNCTIONS.filter(
+            (f) => typeof f.handlebarsEquivalent === 'string' && f.handlebarsEquivalent.length > 0
+        ).map((f) => f.name.toLowerCase());
+        assert.deepEqual(
+            Object.keys(AMP_TO_HANDLEBARS).sort(),
+            expectedKeys.sort(),
+            'AMP_TO_HANDLEBARS keys must match ampscript-data handlebarsEquivalent entries'
+        );
+        assert.ok(Object.keys(AMP_TO_HANDLEBARS).length > 0, 'expected at least one mapped helper');
+    });
+
+    test('every AMP_TO_HANDLEBARS value names a real handlebars-data helper', () => {
+        for (const helperName of Object.values(AMP_TO_HANDLEBARS)) {
+            assert.ok(
+                getHandlebarsHelper(helperName),
+                `mapped helper '${helperName}' must exist in handlebars-data`
+            );
+        }
+    });
+
+    test('HANDLEBARS_TO_AMP is the inverse of AMP_TO_HANDLEBARS (by canonical helper name)', () => {
+        for (const [ampKey, helperName] of Object.entries(AMP_TO_HANDLEBARS)) {
+            const back = HANDLEBARS_TO_AMP[helperName.toLowerCase()];
+            assert.ok(back, `HANDLEBARS_TO_AMP['${helperName.toLowerCase()}'] should exist`);
+            assert.equal(
+                back.toLowerCase(),
+                ampKey,
+                `HANDLEBARS_TO_AMP should map '${helperName}' back to '${ampKey}'`
+            );
+        }
+    });
+
+    test('AMP_MCN_HANDLEBARS_GAP matches ampscript-data mcnHandlebarsGap entries', () => {
+        const expected = AMPSCRIPT_FUNCTIONS.filter((f) => f.mcnHandlebarsGap === true).map((f) =>
+            f.name.toLowerCase()
+        );
+        assert.deepEqual([...AMP_MCN_HANDLEBARS_GAP].sort(), expected.sort());
+        assert.ok(
+            AMP_MCN_HANDLEBARS_GAP.has('contentblockbykey'),
+            'ContentBlockByKey is a known gap'
+        );
+    });
+
+    test('Category C invariant: gap functions have no handlebarsEquivalent mapping', () => {
+        for (const gapKey of AMP_MCN_HANDLEBARS_GAP) {
+            assert.equal(
+                AMP_TO_HANDLEBARS[gapKey],
+                undefined,
+                `gap function '${gapKey}' must not appear in AMP_TO_HANDLEBARS (Category C)`
+            );
+        }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// convertAmpscriptToHandlebars tool logic (3-category model)
+// ---------------------------------------------------------------------------
+
+describe('convertAmpscriptToHandlebars tool logic', () => {
+    test('Category A: mapped function → {{helper …}}', () => {
+        // Concat maps to the 'concat' helper (handlebarsEquivalent: 'concat')
+        const result = ampscriptToHandlebars('%%=Concat("Hello, ", @name)=%%');
+        assert.ok(
+            result.convertedCode.includes('{{concat'),
+            `expected {{concat …}}, got: ${result.convertedCode}`
+        );
+        assert.ok(result.changes.length > 0, 'expected at least one change entry');
+    });
+
+    test('bare variable %%=v(@x)=%% → {{x}}', () => {
+        const result = ampscriptToHandlebars('Hello %%=v(@firstName)=%%');
+        assert.ok(
+            result.convertedCode.includes('{{firstName}}'),
+            `expected {{firstName}}, got: ${result.convertedCode}`
+        );
+    });
+
+    test('Category C: ContentBlockByKey → distinct MANUAL_REWRITE note (runtime gap)', () => {
+        const result = ampscriptToHandlebars('%%=ContentBlockByKey("my-block")=%%');
+        assert.ok(
+            result.convertedCode.includes('MANUAL_REWRITE_REQUIRED'),
+            `expected MANUAL_REWRITE_REQUIRED, got: ${result.convertedCode}`
+        );
+        assert.ok(
+            result.convertedCode.includes(HBS_GAP_NOTE),
+            `Category C must use the distinct gap note, got: ${result.convertedCode}`
+        );
+    });
+
+    test('Category B differs from Category C (no gap note for plain unsupported fn)', () => {
+        // InsertDE has no handlebarsEquivalent and is not a gap → Category B
+        const result = ampscriptToHandlebars('%%=InsertDE("DE","Col","Val")=%%');
+        assert.ok(
+            result.convertedCode.includes('MANUAL_REWRITE_REQUIRED'),
+            `expected MANUAL_REWRITE_REQUIRED, got: ${result.convertedCode}`
+        );
+        assert.ok(
+            !result.convertedCode.includes(HBS_GAP_NOTE),
+            'Category B must NOT use the Category C gap note'
+        );
+    });
+
+    test('procedural %%[ … ]%% block → flagged MANUAL_REWRITE_REQUIRED', () => {
+        const result = ampscriptToHandlebars('%%[ SET @x = "y" ]%%');
+        assert.ok(
+            result.convertedCode.includes('MANUAL_REWRITE_REQUIRED'),
+            `procedural block should be flagged, got: ${result.convertedCode}`
+        );
+        assert.ok(result.flaggedSections.length > 0, 'expected flagged section for the block');
+    });
+
+    test('result shape: convertedCode, changes, flaggedSections', () => {
+        const result = ampscriptToHandlebars('%%=v(@x)=%%');
+        assert.ok(typeof result.convertedCode === 'string');
+        assert.ok(Array.isArray(result.changes));
+        assert.ok(Array.isArray(result.flaggedSections));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// convertHandlebarsToAmpscript tool logic
+// ---------------------------------------------------------------------------
+
+describe('convertHandlebarsToAmpscript tool logic', () => {
+    test('bare {{name}} → %%=v(@name)=%%', () => {
+        const result = handlebarsToAmpscript('Hello {{firstName}}');
+        assert.ok(
+            result.convertedCode.includes('v(@firstName)') ||
+                result.convertedCode.includes('@firstName'),
+            `expected v(@firstName), got: ${result.convertedCode}`
+        );
+    });
+
+    test('mapped helper {{concat …}} → %%=Concat(…)=%%', () => {
+        const result = handlebarsToAmpscript('{{concat "a" "b"}}');
+        assert.ok(
+            result.convertedCode.includes('Concat('),
+            `expected Concat(), got: ${result.convertedCode}`
+        );
+    });
+
+    test('block helper {{#each}} → flagged MANUAL_REWRITE_REQUIRED', () => {
+        const result = handlebarsToAmpscript('{{#each items}}{{name}}{{/each}}');
+        assert.ok(
+            result.flaggedSections.length > 0 ||
+                result.convertedCode.includes('MANUAL_REWRITE_REQUIRED'),
+            `block helper should be flagged, got: ${result.convertedCode}`
+        );
+    });
+
+    test('result shape: convertedCode, changes, flaggedSections', () => {
+        const result = handlebarsToAmpscript('{{x}}');
+        assert.ok(typeof result.convertedCode === 'string');
+        assert.ok(Array.isArray(result.changes));
+        assert.ok(Array.isArray(result.flaggedSections));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// convertSsjsToHandlebars tool logic (transitive SSJS → AMP → HBS)
+// ---------------------------------------------------------------------------
+
+describe('convertSsjsToHandlebars tool logic', () => {
+    test('imperative SSJS is conservatively flagged for manual rewrite', () => {
+        const code = 'var items = [1,2,3]; items.forEach(function(i) { Write(i); });';
+        const result = ssjsToHandlebars(code);
+        assert.ok(
+            result.flaggedSections.length > 0 ||
+                result.convertedCode.includes('MANUAL_REWRITE_REQUIRED'),
+            `imperative SSJS should be flagged, got: ${result.convertedCode}`
+        );
+    });
+
+    test('result shape: convertedCode, changes, flaggedSections', () => {
+        const result = ssjsToHandlebars('Platform.Function.Trim("hi");');
+        assert.ok(typeof result.convertedCode === 'string');
+        assert.ok(Array.isArray(result.changes));
+        assert.ok(Array.isArray(result.flaggedSections));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// validate_handlebars tool logic (LSP, targetPlatform: next)
+// ---------------------------------------------------------------------------
+
+describe('validate_handlebars tool logic', () => {
+    test('clean Handlebars produces no handlebars-source diagnostics', () => {
+        const diags = validateAmpscript('Hello {{uppercase firstName}}', {
+            maxNumberOfProblems: 100,
+            targetPlatform: 'next',
+        }).filter((d) => d.source === 'handlebars');
+        assert.equal(
+            diags.length,
+            0,
+            `expected no handlebars diagnostics, got: ${JSON.stringify(diags)}`
+        );
+    });
+
+    test('partial {{> x}} flagged as unsupported construct', () => {
+        const diags = validateAmpscript('{{> myPartial}}', {
+            maxNumberOfProblems: 100,
+            targetPlatform: 'next',
+        }).filter((d) => d.source === 'handlebars');
+        assert.ok(diags.length > 0, 'partials should produce a handlebars diagnostic');
+        assert.ok(
+            diags.some((d) => d.message.toLowerCase().includes('partial')),
+            `expected a partial-related message, got: ${JSON.stringify(diags.map((d) => d.message))}`
+        );
+    });
+});
+
+// ---------------------------------------------------------------------------
+// lookup_handlebars_helper + list_handlebars_helpers tool logic (LSP)
+// ---------------------------------------------------------------------------
+
+describe('lookup_handlebars_helper tool logic', () => {
+    test('finds a known helper case-insensitively', () => {
+        const helper = sfmcLanguageService.lookupHandlebarsHelper('uppercase');
+        assert.ok(helper, 'uppercase helper should be found');
+        assert.equal(helper.name.toLowerCase(), 'uppercase');
+    });
+
+    test('returns null/undefined for unknown helper', () => {
+        const helper = sfmcLanguageService.lookupHandlebarsHelper('totallyMadeUpHelper999');
+        assert.ok(!helper, 'unknown helper should not be found');
+    });
+
+    test('helper has expected shape (name, category, origin, params)', () => {
+        const helper = sfmcLanguageService.lookupHandlebarsHelper('concat');
+        assert.ok(helper, 'concat helper should be found');
+        assert.ok(typeof helper.category === 'string');
+        assert.ok(typeof helper.origin === 'string');
+        assert.ok(Array.isArray(helper.params));
+    });
+});
+
+describe('list_handlebars_helpers tool logic', () => {
+    test('returns a non-empty catalog', () => {
+        const helpers = sfmcLanguageService.listHandlebarsHelpers();
+        assert.ok(Array.isArray(helpers));
+        assert.ok(helpers.length > 0, 'expected at least one Handlebars helper');
+    });
+
+    test('every helper carries an mcnSince version', () => {
+        const helpers = sfmcLanguageService.listHandlebarsHelpers();
+        for (const h of helpers) {
+            assert.ok(typeof h.mcnSince === 'number', `${h.name} should have a numeric mcnSince`);
+        }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// get_handlebars_completions tool logic (LSP catalog)
+// ---------------------------------------------------------------------------
+
+describe('get_handlebars_completions tool logic', () => {
+    test('catalog is non-empty', () => {
+        const items = sfmcLanguageService.getHandlebarsCompletionCatalog();
+        assert.ok(Array.isArray(items));
+        assert.ok(items.length > 0, 'expected Handlebars completion items');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// format_sfmc_code — Handlebars whitespace normalization
+// ---------------------------------------------------------------------------
+
+/**
+ * Mirror of normalizeHandlebarsWhitespace in index.ts (the tool handler is
+ * not exported, so we assert the documented normalization contract here).
+ * @param {string} code - input
+ * @returns {string} normalized
+ */
+function normalizeHandlebarsWhitespace(code) {
+    return code.replaceAll(/\{\{([\s\S]*?)\}\}/g, (full, inner) => {
+        if (inner.startsWith('!')) {
+            return full;
+        }
+        return `{{${inner.replaceAll(/\s+/g, ' ').trim()}}}`;
+    });
+}
+
+describe('format_sfmc_code Handlebars logic', () => {
+    test('collapses interior whitespace: {{ foo   bar }} → {{foo bar}}', () => {
+        assert.equal(normalizeHandlebarsWhitespace('{{ foo   bar }}'), '{{foo bar}}');
+    });
+
+    test('leaves {{!-- comment --}} untouched', () => {
+        const input = '{{!--  keep   spacing  --}}';
+        assert.equal(normalizeHandlebarsWhitespace(input), input);
+    });
+
+    test('idempotent', () => {
+        const once = normalizeHandlebarsWhitespace('{{ uppercase   firstName }}');
+        assert.equal(normalizeHandlebarsWhitespace(once), once);
     });
 });
