@@ -46,19 +46,19 @@ export function loadChunks(): McnHelpChunk[] {
     return Array.isArray(data.chunks) ? data.chunks : [];
 }
 
-let cache: McnHelpChunk[] | null = null;
+const cacheRef: { chunks: McnHelpChunk[] | null } = { chunks: null };
 
 /**
  * @returns {McnHelpChunk[]}
  */
 export function getMcnChunks(): McnHelpChunk[] {
-    if (!cache) cache = loadChunks();
-    return cache;
+    if (!cacheRef.chunks) cacheRef.chunks = loadChunks();
+    return cacheRef.chunks;
 }
 
 /** Reset cache (tests). */
 export function clearMcnHelpCache(): void {
-    cache = null;
+    cacheRef.chunks = null;
 }
 
 export interface McnSearchHit {

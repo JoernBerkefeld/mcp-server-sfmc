@@ -51,6 +51,11 @@ export default tseslint.config(
             'unicorn/prefer-spread': 'off',
             'unicorn/prefer-string-replace-all': 'error',
             'unicorn/prevent-abbreviations': 'off',
+            'unicorn/name-replacements': 'off',
+            // Opinionated boolean-naming rule (unicorn v70). Disabled to match
+            // sfmc-language-lsp, which keeps it off so exported symbols (e.g.
+            // requiresCoreLoadGlobals) stay stable for downstream consumers.
+            'unicorn/consistent-boolean-name': 'off',
             'jsdoc/require-jsdoc': 'off',
             'jsdoc/require-param-type': 'off',
             'jsdoc/require-returns': 'off',

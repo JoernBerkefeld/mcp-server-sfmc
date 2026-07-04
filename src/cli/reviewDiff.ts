@@ -10,46 +10,12 @@ import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-
-export type FailOnLevel = 'error' | 'warning' | 'info';
-
-export interface SeverityCounts {
-    errors: number;
-    warnings: number;
-    infos: number;
-}
-
-/**
- * Counts diagnostic lines emitted by the review_change tool (see src/index.ts).
- * @param output
- */
-export function countReviewSeverities(output: string): SeverityCounts {
-    let errors = 0;
-    let warnings = 0;
-    let infos = 0;
-    for (const line of output.split('\n')) {
-        if (line.startsWith('🔴 ERROR')) errors += 1;
-        else if (line.startsWith('🟡 WARNING')) warnings += 1;
-        else if (line.startsWith('🔵 INFO')) infos += 1;
-    }
-    return { errors, warnings, infos };
-}
-
-/**
- * Whether the CLI should exit with code 1 given counts and --fail-on policy.
- * @param counts
- * @param failOn
- */
-export function shouldFail(counts: SeverityCounts, failOn: FailOnLevel): boolean {
-    if (counts.errors > 0) return true;
-    if ((failOn === 'warning' || failOn === 'info') && counts.warnings > 0) return true;
-    if (failOn === 'info' && counts.infos > 0) return true;
-    return false;
-}
+import { countReviewSeverities, shouldFail, type FailOnLevel } from './reviewSeverity.js';
 
 function toolResultToText(result: CallToolResult): string {
     const parts: string[] = [];
-    for (const block of result.content ?? []) {
+    const contentBlocks = result.content ?? [];
+    for (const block of contentBlocks) {
         if (block.type === 'text' && 'text' in block && typeof block.text === 'string') {
             parts.push(block.text);
         }
@@ -60,7 +26,9 @@ function toolResultToText(result: CallToolResult): string {
 function readStdin(): Promise<string> {
     return new Promise((resolve, reject) => {
         const chunks: Buffer[] = [];
-        stdin.on('data', (c: Buffer) => chunks.push(c));
+        stdin.on('data', (c: Buffer) => {
+            chunks.push(c);
+        });
         stdin.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
         stdin.on('error', reject);
     });
@@ -77,11 +45,11 @@ function serverEntryPath(): string {
     return path.join(here, '..', 'index.js');
 }
 
-function pkgVersion(): string {
+function packageVersion(): string {
     try {
         const p = path.join(projectRoot(), 'package.json');
-        const j = JSON.parse(readFileSync(p, 'utf8')) as { version?: string };
-        return j.version ?? '0.0.0';
+        const index = JSON.parse(readFileSync(p, 'utf8')) as { version?: string };
+        return index.version ?? '0.0.0';
     } catch {
         return '0.0.0';
     }
@@ -107,7 +75,7 @@ Exit codes:
 `);
 }
 
-interface ParsedArgs {
+interface ParsedArguments {
     filePath: string | null;
     failOn: FailOnLevel;
     language?: 'ampscript' | 'ssjs' | 'html' | 'auto';
@@ -115,21 +83,21 @@ interface ParsedArgs {
     help: boolean;
 }
 
-function parseArgs(argv: string[]): ParsedArgs {
+function parseArguments(argv: string[]): ParsedArguments {
     let failOn: FailOnLevel = 'error';
-    let language: ParsedArgs['language'];
+    let language: ParsedArguments['language'];
     let maxProblems: number | undefined;
-    let help = false;
+    let isHelp = false;
     const positional: string[] = [];
 
-    for (let i = 0; i < argv.length; i++) {
-        const a = argv[i];
+    for (let index = 0; index < argv.length; index++) {
+        const a = argv[index];
         if (a === '-h' || a === '--help') {
-            help = true;
+            isHelp = true;
             continue;
         }
         if (a === '--fail-on') {
-            const v = argv[++i];
+            const v = argv[++index];
             if (v !== 'error' && v !== 'warning' && v !== 'info') {
                 throw new Error(
                     `--fail-on must be error, warning, or info, got: ${v ?? '(missing)'}`
@@ -139,7 +107,7 @@ function parseArgs(argv: string[]): ParsedArgs {
             continue;
         }
         if (a === '--language') {
-            const v = argv[++i];
+            const v = argv[++index];
             if (v !== 'ampscript' && v !== 'ssjs' && v !== 'html' && v !== 'auto') {
                 throw new Error(`--language must be ampscript, ssjs, html, or auto`);
             }
@@ -147,8 +115,8 @@ function parseArgs(argv: string[]): ParsedArgs {
             continue;
         }
         if (a === '--max-problems') {
-            const v = argv[++i];
-            const n = v ? Number.parseInt(v, 10) : Number.NaN;
+            const v = argv[++index];
+            const n = v ? Number(v) : NaN;
             if (!Number.isFinite(n) || n < 1) {
                 throw new Error(`--max-problems must be a positive integer`);
             }
@@ -170,7 +138,7 @@ function parseArgs(argv: string[]): ParsedArgs {
         failOn,
         language,
         maxProblems,
-        help,
+        help: isHelp,
     };
 }
 
@@ -185,9 +153,9 @@ function isExecutedDirectly(): boolean {
 }
 
 async function main(): Promise<void> {
-    let parsed: ParsedArgs;
+    let parsed: ParsedArguments;
     try {
-        parsed = parseArgs(process.argv.slice(2));
+        parsed = parseArguments(process.argv.slice(2));
     } catch (ex) {
         // eslint-disable-next-line no-console -- intentional CLI error output
         console.error(String(ex instanceof Error ? ex.message : ex));
@@ -212,19 +180,19 @@ async function main(): Promise<void> {
 
     const client = new Client({
         name: 'sfmc-review-diff',
-        version: pkgVersion(),
+        version: packageVersion(),
     });
 
     try {
         await client.connect(transport);
 
-        const args: Record<string, unknown> = { diff: diffText };
-        if (parsed.language !== undefined) args.language = parsed.language;
-        if (parsed.maxProblems !== undefined) args.maxProblems = parsed.maxProblems;
+        const arguments_: Record<string, unknown> = { diff: diffText };
+        if (parsed.language !== undefined) arguments_.language = parsed.language;
+        if (parsed.maxProblems !== undefined) arguments_.maxProblems = parsed.maxProblems;
 
         const result = await client.callTool({
             name: 'review_change',
-            arguments: args,
+            arguments: arguments_,
         });
 
         const text = toolResultToText(result as CallToolResult);

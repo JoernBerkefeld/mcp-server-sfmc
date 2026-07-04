@@ -267,6 +267,20 @@ export const NON_MIGRATABLE_SSJS_PATTERNS: ReadonlyArray<{ pattern: RegExp; reas
     },
 ];
 
+/**
+ * Returns the first non-migratable SSJS pattern that matches the given code, or undefined.
+ * @param code single line of trimmed SSJS source
+ */
+function findNonMigratableSsjsPattern(
+    code: string
+): { pattern: RegExp; reason: string } | undefined {
+    return NON_MIGRATABLE_SSJS_PATTERNS.find(({ pattern }) => {
+        // Reset lastIndex for global regexes
+        pattern.lastIndex = 0;
+        return pattern.test(code);
+    });
+}
+
 // ---------------------------------------------------------------------------
 // SSJS → AMPscript conversion
 // ---------------------------------------------------------------------------
@@ -301,8 +315,8 @@ export function ssjsToAmpscript(code: string): ConversionResult {
     const rawLines = inner.split('\n');
     const outputLines: string[] = [];
 
-    for (const [i, original] of rawLines.entries()) {
-        const lineNum = i + 1;
+    for (const [index, original] of rawLines.entries()) {
+        const lineNumber = index + 1;
         const trimmed = original.trim();
 
         // Skip blank lines, Platform.Load(), var-only declarations with no value
@@ -314,28 +328,21 @@ export function ssjsToAmpscript(code: string): ConversionResult {
         // Skip Platform.Load() — no AMPscript equivalent, not needed in MCN
         if (/^Platform\.Load\s*\(/i.test(trimmed)) {
             changes.push({
-                line: lineNum,
+                line: lineNumber,
                 description: 'Removed Platform.Load() (not needed in AMPscript)',
             });
             continue;
         }
 
         // Check for non-migratable patterns first
-        let isFlagged = false;
-        for (const { pattern, reason } of NON_MIGRATABLE_SSJS_PATTERNS) {
-            // Reset lastIndex for global regexes
-            pattern.lastIndex = 0;
-            if (pattern.test(trimmed)) {
-                outputLines.push(
-                    `%%-- MANUAL_REWRITE_REQUIRED: ${reason} --%%`,
-                    `%%-- Original: ${trimmed} --%%`
-                );
-                flaggedSections.push({ line: lineNum, code: trimmed, reason });
-                isFlagged = true;
-                break;
-            }
-        }
-        if (isFlagged) {
+        const nonMigratable = findNonMigratableSsjsPattern(trimmed);
+        if (nonMigratable) {
+            const { reason } = nonMigratable;
+            outputLines.push(
+                `%%-- MANUAL_REWRITE_REQUIRED: ${reason} --%%`,
+                `%%-- Original: ${trimmed} --%%`
+            );
+            flaggedSections.push({ line: lineNumber, code: trimmed, reason });
             continue;
         }
 
@@ -350,44 +357,44 @@ export function ssjsToAmpscript(code: string): ConversionResult {
         // Platform.Variable.SetValue("name", value) → SET @name = value (strip ; at end if present)
         line = line.replaceAll(
             /Platform\.Variable\.SetValue\s*\(\s*["']([^"']+)["']\s*,\s*([^)]+)\)\s*;?/gi,
-            (_, varName: string, value: string) => {
+            (_, variableName: string, value: string) => {
                 changes.push({
-                    line: lineNum,
-                    description: `Platform.Variable.SetValue → SET @${varName}`,
+                    line: lineNumber,
+                    description: `Platform.Variable.SetValue → SET @${variableName}`,
                 });
-                return `SET @${varName} = ${value.trim()}`;
+                return `SET @${variableName} = ${value.trim()}`;
             }
         );
 
         // Platform.Response.Write(expr) → OutputLine(expr)
         line = line.replaceAll(/Platform\.Response\.Write\s*\(/gi, () => {
-            changes.push({ line: lineNum, description: 'Platform.Response.Write → OutputLine' });
+            changes.push({ line: lineNumber, description: 'Platform.Response.Write → OutputLine' });
             return 'OutputLine(';
         });
 
         // Platform.Function.X(args) → X(args) using known function map
-        line = line.replaceAll(/Platform\.Function\.(\w+)\s*\(/gi, (_, fnName: string) => {
-            const key = fnName.toLowerCase();
+        line = line.replaceAll(/Platform\.Function\.(\w+)\s*\(/gi, (_, functionName: string) => {
+            const key = functionName.toLowerCase();
             if (SSJS_ONLY_FUNCTIONS.has(key)) {
                 flaggedSections.push({
-                    line: lineNum,
-                    code: `Platform.Function.${fnName}(...)`,
-                    reason: `Platform.Function.${fnName} has no AMPscript equivalent`,
+                    line: lineNumber,
+                    code: `Platform.Function.${functionName}(...)`,
+                    reason: `Platform.Function.${functionName} has no AMPscript equivalent`,
                 });
-                return `/* MANUAL_REWRITE_REQUIRED: Platform.Function.${fnName} has no AMPscript equivalent */ ${fnName}(`;
+                return `/* MANUAL_REWRITE_REQUIRED: Platform.Function.${functionName} has no AMPscript equivalent */ ${functionName}(`;
             }
             const ampName = PLATFORM_FUNCTION_TO_AMP[key];
             if (!ampName) {
                 flaggedSections.push({
-                    line: lineNum,
-                    code: `Platform.Function.${fnName}(...)`,
-                    reason: `Platform.Function.${fnName} not found in ssjs-data catalog`,
+                    line: lineNumber,
+                    code: `Platform.Function.${functionName}(...)`,
+                    reason: `Platform.Function.${functionName} not found in ssjs-data catalog`,
                 });
-                return `/* MANUAL_REWRITE_REQUIRED: unknown Platform.Function.${fnName} */ ${fnName}(`;
+                return `/* MANUAL_REWRITE_REQUIRED: unknown Platform.Function.${functionName} */ ${functionName}(`;
             }
             changes.push({
-                line: lineNum,
-                description: `Platform.Function.${fnName} → ${ampName}`,
+                line: lineNumber,
+                description: `Platform.Function.${functionName} → ${ampName}`,
             });
             return `${ampName}(`;
         });
@@ -395,38 +402,41 @@ export function ssjsToAmpscript(code: string): ConversionResult {
         // var x = expr; → SET @x = expr
         line = line.replace(
             /\bvar\s+([A-Za-z_]\w*)\s*=\s*(.+?)\s*;?\s*$/,
-            (_, varName: string, value: string) => {
+            (_, variableName: string, value: string) => {
                 changes.push({
-                    line: lineNum,
-                    description: `var ${varName} = ... → SET @${varName}`,
+                    line: lineNumber,
+                    description: `var ${variableName} = ... → SET @${variableName}`,
                 });
-                return `SET @${varName} = ${value.trim()}`;
+                return `SET @${variableName} = ${value.trim()}`;
             }
         );
 
         // var x; → VAR @x
-        line = line.replace(/\bvar\s+([A-Za-z_]\w*)\s*;?\s*$/, (_, varName: string) => {
-            changes.push({ line: lineNum, description: `var ${varName} → VAR @${varName}` });
-            return `VAR @${varName}`;
+        line = line.replace(/\bvar\s+([A-Za-z_]\w*)\s*;?\s*$/, (_, variableName: string) => {
+            changes.push({
+                line: lineNumber,
+                description: `var ${variableName} → VAR @${variableName}`,
+            });
+            return `VAR @${variableName}`;
         });
 
         // Control flow: if (cond) { → IF cond THEN
         line = line.replace(/^\s*if\s*\((.+)\)\s*\{\s*$/, (_, cond: string) => {
             const ampCond = ssjsCondToAmp(cond.trim());
-            changes.push({ line: lineNum, description: 'if (...) { → IF ... THEN' });
+            changes.push({ line: lineNumber, description: 'if (...) { → IF ... THEN' });
             return `IF ${ampCond} THEN`;
         });
 
         // } else if (cond) { → ELSEIF cond THEN
         line = line.replace(/^\s*\}\s*else\s+if\s*\((.+)\)\s*\{\s*$/, (_, cond: string) => {
             const ampCond = ssjsCondToAmp(cond.trim());
-            changes.push({ line: lineNum, description: '} else if (...) { → ELSEIF ... THEN' });
+            changes.push({ line: lineNumber, description: '} else if (...) { → ELSEIF ... THEN' });
             return `ELSEIF ${ampCond} THEN`;
         });
 
         // } else { → ELSE
         line = line.replace(/^\s*\}\s*else\s*\{\s*$/, () => {
-            changes.push({ line: lineNum, description: '} else { → ELSE' });
+            changes.push({ line: lineNumber, description: '} else { → ELSE' });
             return 'ELSE';
         });
 
@@ -436,17 +446,17 @@ export function ssjsToAmpscript(code: string): ConversionResult {
                 line
             );
         if (forMatch) {
-            const [, iterVar, start, end] = forMatch;
+            const [, iterVariable, start, end] = forMatch;
             changes.push({
-                line: lineNum,
-                description: `for (var ${iterVar}...) → FOR @${iterVar} = ${start} TO ${end} DO`,
+                line: lineNumber,
+                description: `for (var ${iterVariable}...) → FOR @${iterVariable} = ${start} TO ${end} DO`,
             });
-            line = `FOR @${iterVar} = ${start} TO ${end} DO`;
+            line = `FOR @${iterVariable} = ${start} TO ${end} DO`;
         }
 
         // Standalone closing brace } → ENDIF (best-effort; may not always be correct)
         if (/^\s*\}\s*$/.test(line) && !/^\s*\}\s*(else|catch|finally)/.test(line)) {
-            changes.push({ line: lineNum, description: '} → ENDIF' });
+            changes.push({ line: lineNumber, description: '} → ENDIF' });
             line = 'ENDIF';
         }
 
@@ -512,8 +522,8 @@ export function ampscriptToSsjs(code: string): ConversionResult {
     const lines = normalized.split('\n');
     const lineOffset = 0;
 
-    for (const [i, line] of lines.entries()) {
-        const lineNum = i + 1 + lineOffset;
+    for (const [index, line] of lines.entries()) {
+        const lineNumber = index + 1 + lineOffset;
         const trimmed = line.trim();
 
         if (!trimmed) {
@@ -524,53 +534,56 @@ export function ampscriptToSsjs(code: string): ConversionResult {
         // %%=Output(@x)=%% or %%=OutputLine(@x)=%%
         const inlineOutputMatch = /^%%=\s*(?:Output|OutputLine)\s*\((.+)\)\s*=%%$/i.exec(trimmed);
         if (inlineOutputMatch) {
-            const expr = stripAmpVars(inlineOutputMatch[1].trim());
+            const expression = stripAmpVars(inlineOutputMatch[1].trim());
             changes.push({
-                line: lineNum,
+                line: lineNumber,
                 description: '%%=Output(...)=%% → Platform.Response.Write(...)',
             });
-            outputLines.push(`Platform.Response.Write(${expr});`);
+            outputLines.push(`Platform.Response.Write(${expression});`);
             continue;
         }
 
         // %%=FunctionName(args)=%% → Platform.Response.Write(Platform.Function.FunctionName(args))
-        const inlineFnMatch = /^%%=\s*(\w+)\s*\((.*)?\)\s*=%%$/i.exec(trimmed);
-        if (inlineFnMatch) {
-            const fnName = inlineFnMatch[1];
-            const args = inlineFnMatch[2]?.trim() ?? '';
-            const key = fnName.toLowerCase();
+        const inlineFunctionMatch = /^%%=\s*(\w+)\s*\((.*)?\)\s*=%%$/i.exec(trimmed);
+        if (inlineFunctionMatch) {
+            const functionName = inlineFunctionMatch[1];
+            const arguments_ = inlineFunctionMatch[2]?.trim() ?? '';
+            const key = functionName.toLowerCase();
             const ssName = AMP_TO_PLATFORM_FUNCTION[key];
-            const argsConverted = stripAmpVars(args);
+            const nativeHint = AMP_NATIVE_JS_HINTS[key];
+            const argumentsConverted = stripAmpVars(arguments_);
             if (ssName) {
                 changes.push({
-                    line: lineNum,
-                    description: `%%=${fnName}(...)=%% → Platform.Response.Write(Platform.Function.${ssName}(...))`,
+                    line: lineNumber,
+                    description: `%%=${functionName}(...)=%% → Platform.Response.Write(Platform.Function.${ssName}(...))`,
                 });
                 outputLines.push(
-                    `Platform.Response.Write(Platform.Function.${ssName}(${argsConverted}));`
+                    `Platform.Response.Write(Platform.Function.${ssName}(${argumentsConverted}));`
                 );
-            } else if (AMP_NATIVE_JS_HINTS[key]) {
+            } else if (nativeHint) {
                 changes.push({
-                    line: lineNum,
-                    description: `%%=${fnName}(...)=%% → native JS hint`,
+                    line: lineNumber,
+                    description: `%%=${functionName}(...)=%% → native JS hint`,
                 });
                 outputLines.push(
-                    `Platform.Response.Write(${AMP_NATIVE_JS_HINTS[key]} /* AMPscript: ${fnName}(${args}) */);`
+                    `Platform.Response.Write(${nativeHint} /* AMPscript: ${functionName}(${arguments_}) */);`
                 );
             } else if (CLOUDPAGES_ONLY_FUNCTIONS.has(key)) {
                 // CloudPages-only function
-                outputLines.push(`/* MANUAL_REWRITE_REQUIRED: %%=${fnName}(${args})=%% */`);
+                outputLines.push(
+                    `/* MANUAL_REWRITE_REQUIRED: %%=${functionName}(${arguments_})=%% */`
+                );
                 flaggedSections.push({
-                    line: lineNum,
+                    line: lineNumber,
                     code: trimmed,
-                    reason: `AMPscript function '${fnName}' is CloudPages-only — no SSJS equivalent`,
+                    reason: `AMPscript function '${functionName}' is CloudPages-only — no SSJS equivalent`,
                 });
             } else {
                 // AMP-only function with no native hint → polyfill
                 polyfillUsed.value = true;
                 changes.push({
-                    line: lineNum,
-                    description: `%%=${fnName}(...)=%% → _ampScript polyfill`,
+                    line: lineNumber,
+                    description: `%%=${functionName}(...)=%% → _ampScript polyfill`,
                 });
                 outputLines.push(
                     `Platform.Response.Write(_ampScript('${trimmed.replaceAll("'", String.raw`\'`)}'));`
@@ -583,11 +596,11 @@ export function ampscriptToSsjs(code: string): ConversionResult {
         const blockMatch = /^%%\[\s*([\s\S]*?)\s*\]%%$/i.exec(trimmed);
         if (blockMatch) {
             const blockContent = blockMatch[1].trim();
-            const stmts = blockContent.split(/\n+/);
-            for (const stmt of stmts) {
+            const statements = blockContent.split(/\n+/);
+            for (const statement of statements) {
                 const converted = convertAmpStatement(
-                    stmt.trim(),
-                    lineNum,
+                    statement.trim(),
+                    lineNumber,
                     changes,
                     flaggedSections,
                     polyfillUsed
@@ -603,7 +616,7 @@ export function ampscriptToSsjs(code: string): ConversionResult {
         if (/^(SET|VAR|IF|ELSEIF|ELSE|ENDIF|FOR|NEXT|OUTPUT|OUTPUTLINE)\b/i.test(trimmed)) {
             const converted = convertAmpStatement(
                 trimmed,
-                lineNum,
+                lineNumber,
                 changes,
                 flaggedSections,
                 polyfillUsed
@@ -618,7 +631,7 @@ export function ampscriptToSsjs(code: string): ConversionResult {
         if (/^\w+\s*\(/.test(trimmed)) {
             const converted = convertAmpStatement(
                 trimmed,
-                lineNum,
+                lineNumber,
                 changes,
                 flaggedSections,
                 polyfillUsed
@@ -703,41 +716,43 @@ function convertAmpStatement(
     // SET @x = expr → var x = expr;
     const setMatch = /^SET\s+@(\w+)\s*=\s*(.+)$/i.exec(stmt);
     if (setMatch) {
-        const [, varName, expr] = setMatch;
-        const exprTrimmed = expr.trim();
+        const [, variableName, expression] = setMatch;
+        const expressionTrimmed = expression.trim();
         // Check if the expression is a single AMP-only function call with no Platform.Function equivalent
         // and no native JS hint — if so, emit _ampScript polyfill rather than a broken expression.
-        const singleFnMatch = /^(\w+)\s*\(/.exec(exprTrimmed);
-        if (singleFnMatch) {
-            const key = singleFnMatch[1].toLowerCase();
+        const singleFunctionMatch = /^(\w+)\s*\(/.exec(expressionTrimmed);
+        if (singleFunctionMatch) {
+            const key = singleFunctionMatch[1].toLowerCase();
             const hasSsjsEquiv = AMP_TO_PLATFORM_FUNCTION[key] !== undefined;
             const hasNativeHint = AMP_NATIVE_JS_HINTS[key] !== undefined;
             if (!hasSsjsEquiv && !hasNativeHint && !CLOUDPAGES_ONLY_FUNCTIONS.has(key)) {
                 polyfillUsed.value = true;
                 changes.push({
                     line: lineNum,
-                    description: `SET @${varName} = ${singleFnMatch[1]}(...) → _ampScript polyfill`,
+                    description: `SET @${variableName} = ${singleFunctionMatch[1]}(...) → _ampScript polyfill`,
                 });
-                return `var ${varName} = _ampScript('${exprTrimmed.replaceAll("'", String.raw`\'`)}');`;
+                return `var ${variableName} = _ampScript('${expressionTrimmed.replaceAll("'", String.raw`\'`)}');`;
             }
         }
-        const ssExpr = convertAmpExpr(exprTrimmed);
+        const ssExpression = convertAmpExpression(expressionTrimmed);
         changes.push({
             line: lineNum,
-            description: `SET @${varName} = ... → var ${varName} = ...`,
+            description: `SET @${variableName} = ... → var ${variableName} = ...`,
         });
-        return `var ${varName} = ${ssExpr};`;
+        return `var ${variableName} = ${ssExpression};`;
     }
 
     // VAR @x, @y → var x, y;
-    const varMatch = /^VAR\s+(.+)$/i.exec(stmt);
-    if (varMatch) {
-        const vars = varMatch[1].split(',').map((v: string) => v.trim().replace(/^@/, ''));
+    const variableMatch = /^VAR\s+(.+)$/i.exec(stmt);
+    if (variableMatch) {
+        const variables = variableMatch[1]
+            .split(',')
+            .map((v: string) => v.trim().replace(/^@/, ''));
         changes.push({
             line: lineNum,
-            description: `VAR @${vars.join(', @')} → var ${vars.join(', ')}`,
+            description: `VAR @${variables.join(', @')} → var ${variables.join(', ')}`,
         });
-        return `var ${vars.join(', ')};`;
+        return `var ${variables.join(', ')};`;
     }
 
     // IF cond THEN → if (cond) {
@@ -771,14 +786,14 @@ function convertAmpStatement(
     // FOR @i = start TO end DO → for (var i = start; i <= end; i++) {
     const forMatch = /^FOR\s+@(\w+)\s*=\s*(\S+?)\s+TO\s+(\S+?)(?:\s+STEP\s+\S+)?\s+DO$/i.exec(stmt);
     if (forMatch) {
-        const [, iterVar, start, end] = forMatch;
+        const [, iterVariable, start, end] = forMatch;
         const ssStart = stripAmpVars(start);
         const ssEnd = stripAmpVars(end);
         changes.push({
             line: lineNum,
-            description: `FOR @${iterVar} = ${start} TO ${end} DO → for loop`,
+            description: `FOR @${iterVariable} = ${start} TO ${end} DO → for loop`,
         });
-        return `for (var ${iterVar} = ${ssStart}; ${iterVar} <= ${ssEnd}; ${iterVar}++) {`;
+        return `for (var ${iterVariable} = ${ssStart}; ${iterVariable} <= ${ssEnd}; ${iterVariable}++) {`;
     }
 
     // NEXT @i → }
@@ -790,24 +805,24 @@ function convertAmpStatement(
     // OUTPUT(expr) / OUTPUTLINE(expr) → Platform.Response.Write(expr)
     const outputMatch = /^(?:OUTPUT|OUTPUTLINE)\s*\((.+)\)$/i.exec(stmt);
     if (outputMatch) {
-        const expr = convertAmpExpr(outputMatch[1].trim());
+        const expression = convertAmpExpression(outputMatch[1].trim());
         changes.push({ line: lineNum, description: 'Output/OutputLine → Platform.Response.Write' });
-        return `Platform.Response.Write(${expr});`;
+        return `Platform.Response.Write(${expression});`;
     }
 
     // Known AMPscript function call → Platform.Function.X(args)
-    const fnCallMatch = /^(\w+)\s*\((.*)?\)$/i.exec(stmt);
-    if (fnCallMatch) {
-        const [, fnName, args] = fnCallMatch;
-        const key = fnName.toLowerCase();
+    const functionCallMatch = /^(\w+)\s*\((.*)?\)$/i.exec(stmt);
+    if (functionCallMatch) {
+        const [, functionName, arguments_] = functionCallMatch;
+        const key = functionName.toLowerCase();
         const ssName = AMP_TO_PLATFORM_FUNCTION[key];
         if (ssName) {
-            const argsConverted = args ? convertAmpExpr(args.trim()) : '';
+            const argumentsConverted = arguments_ ? convertAmpExpression(arguments_.trim()) : '';
             changes.push({
                 line: lineNum,
-                description: `${fnName}(…) → Platform.Function.${ssName}(…)`,
+                description: `${functionName}(…) → Platform.Function.${ssName}(…)`,
             });
-            return `Platform.Function.${ssName}(${argsConverted});`;
+            return `Platform.Function.${ssName}(${argumentsConverted});`;
         }
 
         // CloudPages-only functions have no SSJS/MCN equivalent
@@ -825,7 +840,7 @@ function convertAmpStatement(
         if (hint) {
             changes.push({
                 line: lineNum,
-                description: `${fnName}(…) → native JS equivalent`,
+                description: `${functionName}(…) → native JS equivalent`,
             });
             return `${hint} /* AMPscript: ${stmt} */`;
         }
@@ -834,7 +849,7 @@ function convertAmpStatement(
         polyfillUsed.value = true;
         changes.push({
             line: lineNum,
-            description: `${fnName}(…) → _ampScript polyfill (no direct SSJS equivalent)`,
+            description: `${functionName}(…) → _ampScript polyfill (no direct SSJS equivalent)`,
         });
         return `_ampScript('${stmt.replaceAll("'", String.raw`\'`)}');`;
     }
@@ -869,19 +884,19 @@ function convertAmpStatement(
  * @param expr - AMPscript expression string.
  * @returns {string} SSJS expression string.
  */
-function convertAmpExpr(expr: string): string {
+function convertAmpExpression(expr: string): string {
     // Replace known AMPscript function calls with Platform.Function.X equivalents;
     // emit a hint comment for native-hint functions; leave others with a MANUAL_REWRITE comment.
     // Note: AMP-only functions used in a SET assignment are handled at the statement level
     // (convertAmpStatement SET handler) which emits _ampScript(...) for the whole expression.
-    let result = expr.replaceAll(/\b(\w+)\s*\(/g, (match: string, fnName: string) => {
-        const key = fnName.toLowerCase();
+    let result = expr.replaceAll(/\b(\w+)\s*\(/g, (match: string, functionName: string) => {
+        const key = functionName.toLowerCase();
         const ssName = AMP_TO_PLATFORM_FUNCTION[key];
         if (ssName) return `Platform.Function.${ssName}(`;
         const hint = AMP_NATIVE_JS_HINTS[key];
-        if (hint) return `${hint} /* ${fnName}( */`;
+        if (hint) return `${hint} /* ${functionName}( */`;
         // Unknown function in expression context — annotate
-        return `/* MANUAL_REWRITE_REQUIRED: no SSJS equivalent for ${fnName} */ ${fnName}(`;
+        return `/* MANUAL_REWRITE_REQUIRED: no SSJS equivalent for ${functionName} */ ${functionName}(`;
     });
 
     // Strip @ from variable references
@@ -934,52 +949,62 @@ export const HBS_GAP_NOTE =
  * @param argsStr - The argument string (contents between the outer parens).
  * @returns {string[]} Trimmed top-level arguments.
  */
-function splitArgs(argsStr: string): string[] {
-    if (!argsStr.trim()) return [];
-    const args: string[] = [];
-    let depth = 0;
-    let current = '';
-    let quote: string | null = null;
-    for (const ch of argsStr) {
-        if (quote) {
-            current += ch;
-            if (ch === quote) quote = null;
-            continue;
+interface ArgSplitState {
+    depth: number;
+    current: string;
+    quote: string | null;
+    args: string[];
+}
+
+/**
+ * Fold a single character into the argument-splitting accumulator state.
+ * @param state - Mutable accumulator carried across characters.
+ * @param ch - The current character.
+ */
+function foldArgumentChar(state: ArgSplitState, ch: string): void {
+    if (state.quote) {
+        state.current += ch;
+        if (ch === state.quote) state.quote = null;
+        return;
+    }
+    switch (ch) {
+        case '"':
+        case "'": {
+            state.quote = ch;
+            state.current += ch;
+            break;
         }
-        switch (ch) {
-            case '"':
-            case "'": {
-                quote = ch;
-                current += ch;
-
-                break;
-            }
-            case '(':
-            case '[': {
-                depth++;
-                current += ch;
-
-                break;
-            }
-            case ')':
-            case ']': {
-                depth--;
-                current += ch;
-
-                break;
-            }
-            default: {
-                if (ch === ',' && depth === 0) {
-                    args.push(current.trim());
-                    current = '';
-                } else {
-                    current += ch;
-                }
+        case '(':
+        case '[': {
+            state.depth++;
+            state.current += ch;
+            break;
+        }
+        case ')':
+        case ']': {
+            state.depth--;
+            state.current += ch;
+            break;
+        }
+        default: {
+            if (ch === ',' && state.depth === 0) {
+                state.args.push(state.current.trim());
+                state.current = '';
+            } else {
+                state.current += ch;
             }
         }
     }
-    if (current.trim()) args.push(current.trim());
-    return args;
+}
+
+function splitArguments(argsStr: string): string[] {
+    if (!argsStr.trim()) return [];
+    const state: ArgSplitState = { depth: 0, current: '', quote: null, args: [] };
+    for (const ch of argsStr) {
+        foldArgumentChar(state, ch);
+    }
+    if (state.current.trim()) state.args.push(state.current.trim());
+    return state.args;
 }
 
 /**
@@ -988,7 +1013,7 @@ function splitArgs(argsStr: string): string[] {
  * @param arg - A single AMPscript argument.
  * @returns {string} The Handlebars argument.
  */
-function ampArgToHbs(arg: string): string {
+function ampArgumentToHbs(arg: string): string {
     const t = arg.trim();
     if (/^["']/.test(t)) return t;
     return stripAmpVars(t);
@@ -1001,7 +1026,7 @@ function ampArgToHbs(arg: string): string {
  * @param arg - A single Handlebars argument.
  * @returns {string} The AMPscript argument.
  */
-function hbsArgToAmp(arg: string): string {
+function hbsArgumentToAmp(arg: string): string {
     const t = arg.trim();
     if (/^["']/.test(t)) return t;
     if (/^-?\d/.test(t)) return t;
@@ -1034,27 +1059,27 @@ function convertInlineAmpToHbs(
     }
 
     // Bare @var / var → {{var}}
-    const varMatch = /^@?([A-Za-z_]\w*)$/.exec(inner);
-    if (varMatch) {
-        changes.push({ line: lineNum, description: `%%=${inner}=%% → {{${varMatch[1]}}}` });
-        return `{{${varMatch[1]}}}`;
+    const variableMatch = /^@?([A-Za-z_]\w*)$/.exec(inner);
+    if (variableMatch) {
+        changes.push({ line: lineNum, description: `%%=${inner}=%% → {{${variableMatch[1]}}}` });
+        return `{{${variableMatch[1]}}}`;
     }
 
     // FunctionName(args)
-    const fnMatch = /^([A-Za-z_]\w*)\s*\(([\s\S]*)\)$/.exec(inner);
-    if (fnMatch) {
-        const fnName = fnMatch[1];
-        const key = fnName.toLowerCase();
-        const hbsArgs = splitArgs(fnMatch[2]).map((a) => ampArgToHbs(a));
+    const functionMatch = /^([A-Za-z_]\w*)\s*\(([\s\S]*)\)$/.exec(inner);
+    if (functionMatch) {
+        const functionName = functionMatch[1];
+        const key = functionName.toLowerCase();
+        const hbsArguments = splitArguments(functionMatch[2]).map((a) => ampArgumentToHbs(a));
 
         // Category A — mapped helper.
         const helper = AMP_TO_HANDLEBARS[key];
         if (helper) {
             changes.push({
                 line: lineNum,
-                description: `%%=${fnName}(…)=%% → {{${helper} …}}`,
+                description: `%%=${functionName}(…)=%% → {{${helper} …}}`,
             });
-            return `{{${helper}${hbsArgs.length > 0 ? ' ' + hbsArgs.join(' ') : ''}}}`;
+            return `{{${helper}${hbsArguments.length > 0 ? ' ' + hbsArguments.join(' ') : ''}}}`;
         }
 
         // Category C — mcnHandlebarsGap (distinct note from Category B).
@@ -1062,18 +1087,18 @@ function convertInlineAmpToHbs(
             flaggedSections.push({
                 line: lineNum,
                 code: `%%=${inner}=%%`,
-                reason: `${fnName} is ${HBS_GAP_NOTE}`,
+                reason: `${functionName} is ${HBS_GAP_NOTE}`,
             });
-            return `{{!-- MANUAL_REWRITE_REQUIRED: ${fnName} is ${HBS_GAP_NOTE} --}}`;
+            return `{{!-- MANUAL_REWRITE_REQUIRED: ${functionName} is ${HBS_GAP_NOTE} --}}`;
         }
 
         // Category B — no Handlebars counterpart.
         flaggedSections.push({
             line: lineNum,
             code: `%%=${inner}=%%`,
-            reason: `AMPscript function '${fnName}' has no Handlebars equivalent`,
+            reason: `AMPscript function '${functionName}' has no Handlebars equivalent`,
         });
-        return `{{!-- MANUAL_REWRITE_REQUIRED: AMPscript function '${fnName}' has no Handlebars equivalent --}}`;
+        return `{{!-- MANUAL_REWRITE_REQUIRED: AMPscript function '${functionName}' has no Handlebars equivalent --}}`;
     }
 
     // Anything else (complex expression).
@@ -1107,23 +1132,23 @@ export function ampscriptToHandlebars(code: string): ConversionResult {
     const lines = code.split('\n');
     const outputLines: string[] = [];
 
-    let inBlock = false;
-    for (const [i, line] of lines.entries()) {
-        const lineNum = i + 1;
+    let isInBlock = false;
+    for (const [index, line] of lines.entries()) {
+        const lineNumber = index + 1;
         const trimmed = line.trim();
 
         // Track multi-line %%[ … ]%% blocks — flag the whole block once.
-        if (inBlock) {
-            if (/\]%%/.test(line)) inBlock = false;
+        if (isInBlock) {
+            if (/\]%%/.test(line)) isInBlock = false;
             continue;
         }
         if (/%%\[/.test(line)) {
-            if (!/\]%%/.test(line)) inBlock = true;
+            if (!/\]%%/.test(line)) isInBlock = true;
             outputLines.push(
                 '{{!-- MANUAL_REWRITE_REQUIRED: AMPscript block (SET/VAR/IF/FOR) has no Handlebars equivalent — Handlebars cannot assign variables or run imperative control flow --}}'
             );
             flaggedSections.push({
-                line: lineNum,
+                line: lineNumber,
                 code: trimmed.slice(0, 80),
                 reason: 'AMPscript procedural block has no Handlebars counterpart',
             });
@@ -1133,10 +1158,10 @@ export function ampscriptToHandlebars(code: string): ConversionResult {
         // Convert inline expressions on this line.
         const converted = line
             .replaceAll(/%%=\s*([\s\S]*?)\s*=%%/g, (_full, raw: string) =>
-                convertInlineAmpToHbs(raw.trim(), lineNum, changes, flaggedSections)
+                convertInlineAmpToHbs(raw.trim(), lineNumber, changes, flaggedSections)
             )
             .replaceAll(/%%([A-Za-z_]\w*)%%/g, (_full, v: string) => {
-                changes.push({ line: lineNum, description: `%%${v}%% → {{${v}}}` });
+                changes.push({ line: lineNumber, description: `%%${v}%% → {{${v}}}` });
                 return `{{${v}}}`;
             });
         outputLines.push(converted);
@@ -1167,7 +1192,7 @@ export function handlebarsToAmpscript(code: string): ConversionResult {
         (full, raw: string, offset: number) => {
             lineCursor += countNewlines(code.slice(lastIndex, offset));
             lastIndex = offset;
-            const lineNum = lineCursor;
+            const lineNumber = lineCursor;
             const inner = raw.trim();
 
             // Comments — preserve as an AMPscript comment.
@@ -1178,7 +1203,7 @@ export function handlebarsToAmpscript(code: string): ConversionResult {
             // Block helpers / partials / closing tags — no deterministic AMPscript form.
             if (/^[#/>]/.test(inner)) {
                 flaggedSections.push({
-                    line: lineNum,
+                    line: lineNumber,
                     code: full,
                     reason: 'Handlebars block helper / partial has no direct AMPscript equivalent',
                 });
@@ -1189,21 +1214,23 @@ export function handlebarsToAmpscript(code: string): ConversionResult {
             const body = inner.replace(/^&\s*/, '');
 
             // Helper with arguments: {{helper arg1 arg2 …}}
-            const fnMatch = /^([A-Za-z_]\w*)\s+(.+)$/.exec(body);
-            if (fnMatch) {
-                const helperName = fnMatch[1];
+            const functionMatch = /^([A-Za-z_]\w*)\s+(.+)$/.exec(body);
+            if (functionMatch) {
+                const helperName = functionMatch[1];
                 const key = helperName.toLowerCase();
                 const ampName = HANDLEBARS_TO_AMP[key];
-                const ampArgs = splitArgs(fnMatch[2]).map((a) => hbsArgToAmp(a));
+                const ampArguments = splitArguments(functionMatch[2]).map((a) =>
+                    hbsArgumentToAmp(a)
+                );
                 if (ampName) {
                     changes.push({
-                        line: lineNum,
+                        line: lineNumber,
                         description: `{{${helperName} …}} → %%=${ampName}(…)=%%`,
                     });
-                    return `%%=${ampName}(${ampArgs.join(', ')})=%%`;
+                    return `%%=${ampName}(${ampArguments.join(', ')})=%%`;
                 }
                 flaggedSections.push({
-                    line: lineNum,
+                    line: lineNumber,
                     code: full,
                     reason: `Handlebars helper '${helperName}' has no AMPscript equivalent`,
                 });
@@ -1214,7 +1241,7 @@ export function handlebarsToAmpscript(code: string): ConversionResult {
             const bareMatch = /^([A-Za-z_]\w*)$/.exec(body);
             if (bareMatch) {
                 changes.push({
-                    line: lineNum,
+                    line: lineNumber,
                     description: `{{${bareMatch[1]}}} → %%=v(@${bareMatch[1]})=%%`,
                 });
                 return `%%=v(@${bareMatch[1]})=%%`;
@@ -1222,7 +1249,7 @@ export function handlebarsToAmpscript(code: string): ConversionResult {
 
             // Dotted binding path or other expression — context-specific.
             flaggedSections.push({
-                line: lineNum,
+                line: lineNumber,
                 code: full,
                 reason: 'Handlebars binding path requires context-specific AMPscript mapping',
             });
@@ -1317,18 +1344,18 @@ export function rewriteAmpForMcn(code: string, options: McnRewriteOptions): McnR
 
     // 1. Remove StringToDate() wrapper inside FormatDate() first argument
     // FormatDate(StringToDate(x), fmt) → FormatDate(x, fmt)
-    const strToDatePattern = /FormatDate\s*\(\s*StringToDate\s*\(([^)]+)\)\s*,/gi;
-    if (strToDatePattern.test(rewrittenCode)) {
+    const stringToDatePattern = /FormatDate\s*\(\s*StringToDate\s*\(([^)]+)\)\s*,/gi;
+    if (stringToDatePattern.test(rewrittenCode)) {
         rewrittenCode = rewrittenCode.replaceAll(
             /FormatDate\s*\(\s*StringToDate\s*\(([^)]+)\)\s*,/gi,
             'FormatDate($1,'
         );
         // Find affected lines for change tracking
         const lines = code.split('\n');
-        for (const [i, line] of lines.entries()) {
+        for (const [index, line] of lines.entries()) {
             if (/FormatDate\s*\(\s*StringToDate\s*\(/i.test(line)) {
                 changes.push({
-                    line: i + 1,
+                    line: index + 1,
                     type: 'rewritten',
                     description:
                         'Removed StringToDate() wrapper: FormatDate(StringToDate(x), fmt) → FormatDate(x, fmt)',
@@ -1340,34 +1367,32 @@ export function rewriteAmpForMcn(code: string, options: McnRewriteOptions): McnR
     // 2. Convert .NET format strings to Java SimpleDateFormat in FormatDate() calls
     rewrittenCode = rewrittenCode.replaceAll(
         /FormatDate\s*\(\s*([^,]+),\s*"([^"]+)"\s*\)/gi,
-        (match: string, arg1: string, formatStr: string) => {
-            let newFormat = formatStr;
-            let changed = false;
-            let hasShorthand = false;
-
+        (match: string, argument1: string, formatString: string) => {
             // Check for standard shorthands
-            for (const shorthand of DOTNET_STANDARD_SHORTHANDS) {
-                if (new RegExp(`^${shorthand}$`).test(formatStr.trim())) {
-                    hasShorthand = true;
-                }
-            }
+            const trimmedFormat = formatString.trim();
+            const hasShorthand = [...DOTNET_STANDARD_SHORTHANDS].some((shorthand) =>
+                new RegExp(`^${shorthand}$`).test(trimmedFormat)
+            );
 
             if (hasShorthand) {
                 // Annotate with comment about needing explicit format
-                return `FormatDate(${arg1}, "/* MANUAL_REWRITE_REQUIRED: Convert .NET standard shorthand '${formatStr}' to explicit Java SimpleDateFormat pattern */"${formatStr}")`;
+                return `FormatDate(${argument1}, "/* MANUAL_REWRITE_REQUIRED: Convert .NET standard shorthand '${formatString}' to explicit Java SimpleDateFormat pattern */"${formatString}")`;
             }
+
+            let newFormat = formatString;
+            let isChanged = false;
 
             // Apply .NET → Java replacements
             for (const [pattern, replacement] of DOTNET_TO_JAVA_FORMAT_REPLACEMENTS) {
                 const before = newFormat;
-                newFormat = newFormat.replace(pattern, replacement);
+                newFormat = newFormat.replace(pattern, () => replacement);
                 if (newFormat !== before) {
-                    changed = true;
+                    isChanged = true;
                 }
             }
 
-            if (changed) {
-                return `FormatDate(${arg1}, "${newFormat}")`;
+            if (isChanged) {
+                return `FormatDate(${argument1}, "${newFormat}")`;
             }
             return match;
         }
@@ -1376,10 +1401,10 @@ export function rewriteAmpForMcn(code: string, options: McnRewriteOptions): McnR
     // Track format string changes
     const codeLines = code.split('\n');
     const rewrittenLines = rewrittenCode.split('\n');
-    for (const [i, codeLine] of codeLines.entries()) {
-        if (codeLine !== rewrittenLines[i] && /FormatDate/i.test(codeLine)) {
+    for (const [index, codeLine] of codeLines.entries()) {
+        if (codeLine !== rewrittenLines[index] && /FormatDate/i.test(codeLine)) {
             changes.push({
-                line: i + 1,
+                line: index + 1,
                 type: 'rewritten',
                 description: `Converted .NET format string to Java SimpleDateFormat in FormatDate()`,
             });
@@ -1389,13 +1414,13 @@ export function rewriteAmpForMcn(code: string, options: McnRewriteOptions): McnR
     // 3. Annotate Lookup() calls with odd argument counts
     rewrittenCode = rewrittenCode.replaceAll(
         /\bLookup\s*\(([^)]+)\)/gi,
-        (match: string, argsStr: string) => {
-            const argCount = countArgs(argsStr);
+        (match: string, argumentsString: string) => {
+            const argumentCount = countArgs(argumentsString);
             // Lookup takes: DE, returnCol, [searchCol, searchVal, ...]
             // Min 2 args, then pairs after that → should be even number > 2 or exactly 2
             // Odd count after first 2 = problem
-            if (argCount >= 3 && (argCount - 2) % 2 !== 0) {
-                return `${match} %%-- MCN NOTE: Lookup() requires search arguments in column/value pairs (even count after DE and return column). Current arg count (${argCount}) may cause an error in MCN. --%% `;
+            if (argumentCount >= 3 && (argumentCount - 2) % 2 !== 0) {
+                return `${match} %%-- MCN NOTE: Lookup() requires search arguments in column/value pairs (even count after DE and return column). Current arg count (${argumentCount}) may cause an error in MCN. --%% `;
             }
             return match;
         }
@@ -1403,52 +1428,54 @@ export function rewriteAmpForMcn(code: string, options: McnRewriteOptions): McnR
 
     // 4. Mark MCE-only function calls with annotation
     // Find all function calls and mark unsupported ones
-    const funcCallPattern = /\b([A-Z][A-Za-z]+)\s*\(/g;
-    let funcMatch: RegExpExecArray | null;
+    const functionCallPattern = /\b([A-Z][A-Za-z]+)\s*\(/g;
+    let functionMatch: RegExpExecArray | null;
     const seenUnsupported = new Set<string>();
 
-    while ((funcMatch = funcCallPattern.exec(code)) !== null) {
-        const fnName = funcMatch[1];
-        if (!isMcnSupportedFn(fnName) && fnName.length > 1) {
-            seenUnsupported.add(fnName);
+    while ((functionMatch = functionCallPattern.exec(code)) !== null) {
+        const functionName = functionMatch[1];
+        if (!isMcnSupportedFn(functionName) && functionName.length > 1) {
+            seenUnsupported.add(functionName);
         }
     }
 
-    for (const fnName of seenUnsupported) {
-        const mcnNotes = getMcnNotesFn(fnName);
-        const annotationPattern = new RegExp(String.raw`\b${fnName}\s*\(`, 'gi');
+    for (const functionName of seenUnsupported) {
+        const mcnNotes = getMcnNotesFn(functionName);
+        const annotationPattern = new RegExp(String.raw`\b${functionName}\s*\(`, 'gi');
         rewrittenCode = rewrittenCode.replace(annotationPattern, (m: string) => {
-            return `%%-- NOT SUPPORTED IN MCN: ${fnName}${mcnNotes ? ` — ${mcnNotes}` : ''} --%%\n${m}`;
+            return `%%-- NOT SUPPORTED IN MCN: ${functionName}${mcnNotes ? ` — ${mcnNotes}` : ''} --%%\n${m}`;
         });
 
         // Find lines for tracking
-        for (const [i, codeLine] of codeLines.entries()) {
-            if (new RegExp(String.raw`\b${fnName}\s*\(`, 'i').test(codeLine)) {
-                changes.push({
-                    line: i + 1,
-                    type: 'annotated',
-                    description: `${fnName}() is not supported in Marketing Cloud Next`,
-                });
-                nonMigratableItems.push({
-                    line: i + 1,
-                    code: codeLine.trim(),
-                    reason: `${fnName}() is not available in Marketing Cloud Next`,
-                });
-            }
+        const linePattern = new RegExp(String.raw`\b${functionName}\s*\(`, 'i');
+        const matchingLines = codeLines
+            .map((codeLine, index) => ({ codeLine, index }))
+            .filter(({ codeLine }) => linePattern.test(codeLine));
+        for (const { codeLine, index } of matchingLines) {
+            changes.push({
+                line: index + 1,
+                type: 'annotated',
+                description: `${functionName}() is not supported in Marketing Cloud Next`,
+            });
+            nonMigratableItems.push({
+                line: index + 1,
+                code: codeLine.trim(),
+                reason: `${functionName}() is not available in Marketing Cloud Next`,
+            });
         }
     }
 
     // 5. Check for CloudPages functions
-    const cloudFnPattern =
+    const cloudFunctionPattern =
         /\b(CloudPagesURL|RequestParameter|QueryParameter|Redirect|MicrositeURL)\s*\(/gi;
     let cloudMatch: RegExpExecArray | null;
-    while ((cloudMatch = cloudFnPattern.exec(code)) !== null) {
-        const fnName = cloudMatch[1];
-        const lineNum = code.slice(0, cloudMatch.index).split('\n').length;
+    while ((cloudMatch = cloudFunctionPattern.exec(code)) !== null) {
+        const functionName = cloudMatch[1];
+        const lineNumber = code.slice(0, cloudMatch.index).split('\n').length;
         nonMigratableItems.push({
-            line: lineNum,
-            code: codeLines[lineNum - 1]?.trim() ?? fnName,
-            reason: `${fnName}() is a CloudPages-specific function and cannot run in Marketing Cloud Next`,
+            line: lineNumber,
+            code: codeLines[lineNumber - 1]?.trim() ?? functionName,
+            reason: `${functionName}() is a CloudPages-specific function and cannot run in Marketing Cloud Next`,
         });
     }
 
@@ -1457,7 +1484,7 @@ export function rewriteAmpForMcn(code: string, options: McnRewriteOptions): McnR
         (item) => item.reason.includes('CloudPages') || item.reason.includes('NOT SUPPORTED')
     );
     const hasMcnNotes =
-        Array.from(seenUnsupported).some((fn) => getMcnNotesFn(fn) !== null) ||
+        Array.from(seenUnsupported).some((function_) => getMcnNotesFn(function_) !== null) ||
         /FormatDate|StringToDate|Lookup/i.test(code);
     const hasSsjs = /<script[^>]+runat/i.test(code);
 

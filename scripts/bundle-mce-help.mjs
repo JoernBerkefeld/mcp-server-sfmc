@@ -50,9 +50,10 @@ const FOLDER_TO_SCOPE = {
  */
 function inferProductScope(relPath) {
     const p = relPath.replaceAll('\\', '/').toLowerCase();
-    const topFolder = p.split('/')[0];
-    if (FOLDER_TO_SCOPE[topFolder]) {
-        return FOLDER_TO_SCOPE[topFolder];
+    const topFolder = p.split('/', 1)[0];
+    const mappedScope = FOLDER_TO_SCOPE[topFolder];
+    if (mappedScope) {
+        return mappedScope;
     }
     // Legacy mce tree: detect Next by subfolder name
     if (p.includes('/02-marketing-cloud-next-for-engagement/')) {
@@ -112,7 +113,7 @@ function chunkMarkdownFile(fullPath, relPath) {
     /** @type {Array<{ id: string; file: string; relativePath: string; heading: string; body: string; productScope: ProductScope; productLabel: string }>} */
     const chunks = [];
     const parts = text.split(/\n(?=#{2,3}\s+)/);
-    let i = 0;
+    let index = 0;
     for (const part of parts) {
         const trimmed = part.trim();
         if (!trimmed) continue;
@@ -125,7 +126,7 @@ function chunkMarkdownFile(fullPath, relPath) {
         if (body.length > MAX_BODY) {
             body = `${body.slice(0, MAX_BODY)}\n\n…`;
         }
-        const id = `${relPath.replaceAll('\\', '/')}#${i++}`;
+        const id = `${relPath.replaceAll('\\', '/')}#${index++}`;
         chunks.push({
             id,
             file: fileBase,
@@ -186,7 +187,8 @@ function main() {
 
     /** @type {Array<{ id: string; file: string; relativePath: string; heading: string; body: string; productScope: ProductScope; productLabel: string }>} */
     const all = [];
-    for (const full of files.sort()) {
+    const sortedFiles = [...files].sort((a, b) => a.localeCompare(b));
+    for (const full of sortedFiles) {
         const rel = path.relative(sourceDir, full);
         all.push(...chunkMarkdownFile(full, rel));
     }

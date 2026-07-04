@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { countReviewSeverities, shouldFail } from '../dist/cli/reviewDiff.js';
+import { countReviewSeverities, shouldFail } from '../dist/cli/reviewSeverity.js';
 
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cliJs = path.join(repoRoot, 'dist', 'cli', 'reviewDiff.js');
@@ -33,10 +33,10 @@ describe('countReviewSeverities / shouldFail', () => {
         assert.equal(shouldFail(wOnly, 'error'), false);
         assert.equal(shouldFail(wOnly, 'warning'), true);
         assert.equal(shouldFail(wOnly, 'info'), true);
-        const iOnly = { errors: 0, warnings: 0, infos: 1 };
-        assert.equal(shouldFail(iOnly, 'error'), false);
-        assert.equal(shouldFail(iOnly, 'warning'), false);
-        assert.equal(shouldFail(iOnly, 'info'), true);
+        const indexOnly = { errors: 0, warnings: 0, infos: 1 };
+        assert.equal(shouldFail(indexOnly, 'error'), false);
+        assert.equal(shouldFail(indexOnly, 'warning'), false);
+        assert.equal(shouldFail(indexOnly, 'info'), true);
     });
 });
 

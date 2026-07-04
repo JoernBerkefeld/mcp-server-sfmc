@@ -48,16 +48,16 @@ export function loadChunks(): MceHelpChunk[] {
     return Array.isArray(data.chunks) ? data.chunks : [];
 }
 
-let cache: MceHelpChunk[] | null = null;
+const cacheRef: { chunks: MceHelpChunk[] | null } = { chunks: null };
 
 export function getChunks(): MceHelpChunk[] {
-    if (!cache) cache = loadChunks();
-    return cache;
+    if (!cacheRef.chunks) cacheRef.chunks = loadChunks();
+    return cacheRef.chunks;
 }
 
 /** Reset cache (tests). */
 export function clearMceHelpCache(): void {
-    cache = null;
+    cacheRef.chunks = null;
 }
 
 export interface MceSearchHit {

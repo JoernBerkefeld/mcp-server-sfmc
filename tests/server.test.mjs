@@ -147,27 +147,27 @@ describe('validate_sfmc_html tool logic (GTL)', () => {
 
 describe('lookup_ampscript_function tool logic', () => {
     test('finds known function by exact name', () => {
-        const fn = sfmcLanguageService.lookupAmpscriptFunction('Lookup');
-        assert.ok(fn, 'Lookup should be found');
-        assert.equal(fn.name, 'Lookup');
+        const function_ = sfmcLanguageService.lookupAmpscriptFunction('Lookup');
+        assert.ok(function_, 'Lookup should be found');
+        assert.equal(function_.name, 'Lookup');
     });
 
     test('is case-insensitive', () => {
-        const fn = sfmcLanguageService.lookupAmpscriptFunction('lookup');
-        assert.ok(fn, 'lookup (lowercase) should be found');
+        const function_ = sfmcLanguageService.lookupAmpscriptFunction('lookup');
+        assert.ok(function_, 'lookup (lowercase) should be found');
     });
 
     test('returns null for unknown function', () => {
-        const fn = sfmcLanguageService.lookupAmpscriptFunction('CompletelyUnknownFn9999');
-        assert.equal(fn, null);
+        const function_ = sfmcLanguageService.lookupAmpscriptFunction('CompletelyUnknownFn9999');
+        assert.equal(function_, null);
     });
 
     test('returned function has expected shape', () => {
-        const fn = sfmcLanguageService.lookupAmpscriptFunction('DateAdd');
-        assert.ok(fn, 'DateAdd should be found');
-        assert.ok(typeof fn.description === 'string');
-        assert.ok(Array.isArray(fn.params));
-        assert.ok(fn.params.length > 0);
+        const function_ = sfmcLanguageService.lookupAmpscriptFunction('DateAdd');
+        assert.ok(function_, 'DateAdd should be found');
+        assert.ok(typeof function_.description === 'string');
+        assert.ok(Array.isArray(function_.params));
+        assert.ok(function_.params.length > 0);
     });
 });
 
@@ -177,45 +177,45 @@ describe('lookup_ampscript_function tool logic', () => {
 
 describe('lookup_ssjs_function tool logic', () => {
     test('finds Platform function by bare name', () => {
-        const fn = sfmcLanguageService.lookupSsjsFunction('Lookup');
-        assert.ok(fn, 'Lookup should be found in SSJS catalog');
+        const function_ = sfmcLanguageService.lookupSsjsFunction('Lookup');
+        assert.ok(function_, 'Lookup should be found in SSJS catalog');
     });
 
     test('finds WSProxy method', () => {
-        const fn = sfmcLanguageService.lookupSsjsFunction('retrieve');
-        assert.ok(fn, 'retrieve should be found');
+        const function_ = sfmcLanguageService.lookupSsjsFunction('retrieve');
+        assert.ok(function_, 'retrieve should be found');
     });
 
     test('returns null for unknown function', () => {
-        const fn = sfmcLanguageService.lookupSsjsFunction('totallyMadeUpFn999');
-        assert.equal(fn, null);
+        const function_ = sfmcLanguageService.lookupSsjsFunction('totallyMadeUpFn999');
+        assert.equal(function_, null);
     });
 
     test('deprecated function exposes deprecated: true', () => {
         // ContentArea is a known deprecated SSJS function
-        const fn = sfmcLanguageService.lookupSsjsFunction('ContentArea');
-        assert.ok(fn, 'ContentArea should be found');
-        assert.equal(fn.deprecated, true, 'ContentArea should be deprecated');
+        const function_ = sfmcLanguageService.lookupSsjsFunction('ContentArea');
+        assert.ok(function_, 'ContentArea should be found');
+        assert.equal(function_.deprecated, true, 'ContentArea should be deprecated');
     });
 
     test('non-deprecated function does not have deprecated flag', () => {
-        const fn = sfmcLanguageService.lookupSsjsFunction('Lookup');
-        assert.ok(fn, 'Lookup should be found');
-        assert.ok(!fn.deprecated, 'Lookup should not be deprecated');
+        const function_ = sfmcLanguageService.lookupSsjsFunction('Lookup');
+        assert.ok(function_, 'Lookup should be found');
+        assert.ok(!function_.deprecated, 'Lookup should not be deprecated');
     });
 
     test('requiresCoreLoad function exposes requiresCoreLoad: true', () => {
         // Get / Post are Core library HTTP methods that need Platform.Load
-        const fn = sfmcLanguageService.lookupSsjsFunction('Get');
-        assert.ok(fn, 'Get should be found');
-        assert.equal(fn.requiresCoreLoad, true, 'Get should require Core load');
+        const function_ = sfmcLanguageService.lookupSsjsFunction('Get');
+        assert.ok(function_, 'Get should be found');
+        assert.equal(function_.requiresCoreLoad, true, 'Get should require Core load');
     });
 
     test('Platform function does not require Core load', () => {
         // Platform.Function.Lookup is available without Platform.Load
-        const fn = sfmcLanguageService.lookupSsjsFunction('Lookup');
-        assert.ok(fn, 'Lookup should be found');
-        assert.ok(!fn.requiresCoreLoad, 'Lookup should not require Core load');
+        const function_ = sfmcLanguageService.lookupSsjsFunction('Lookup');
+        assert.ok(function_, 'Lookup should be found');
+        assert.ok(!function_.requiresCoreLoad, 'Lookup should not require Core load');
     });
 });
 
@@ -286,23 +286,23 @@ describe('catalog resources logic', () => {
 describe('get_ampscript_completions tool logic', () => {
     test('returns completions inside AMPscript block', () => {
         const code = '%%[\n  ';
-        const doc = {
+        const document = {
             text: code,
             languageId: /** @type {'ampscript'} */ ('ampscript'),
             uri: 'test',
         };
-        const items = sfmcLanguageService.getCompletions(doc, { line: 1, character: 2 });
+        const items = sfmcLanguageService.getCompletions(document, { line: 1, character: 2 });
         assert.ok(items.length > 0, 'Should return completions inside block');
     });
 
     test('returns no completions outside AMPscript block', () => {
         const code = '<html>\n<body>Hello</body>\n</html>';
-        const doc = {
+        const document = {
             text: code,
             languageId: /** @type {'ampscript'} */ ('ampscript'),
             uri: 'test',
         };
-        const items = sfmcLanguageService.getCompletions(doc, { line: 1, character: 5 });
+        const items = sfmcLanguageService.getCompletions(document, { line: 1, character: 5 });
         assert.equal(items.length, 0);
     });
 });
@@ -432,7 +432,7 @@ describe('search_mce_help index', () => {
 
     test('empty query yields no hits', () => {
         clearMceHelpCache();
-        const hits = searchMceHelp('   ', 5, 'any');
+        const hits = searchMceHelp(' '.repeat(3), 5, 'any');
         assert.equal(hits.length, 0);
     });
 });
@@ -446,8 +446,8 @@ describe('search_mce_help index', () => {
 
 describe('lookup_ampscript_function MCN fields', () => {
     test('Lookup: getMcnApiVersion returns 67 and getMcnNotes returns non-null', () => {
-        const fn = sfmcLanguageService.lookupAmpscriptFunction('Lookup');
-        assert.ok(fn, 'Lookup should be found');
+        const function_ = sfmcLanguageService.lookupAmpscriptFunction('Lookup');
+        assert.ok(function_, 'Lookup should be found');
         assert.equal(getMcnApiVersion('Lookup'), 67, 'Lookup mcnSince should be 67');
         const notes = getMcnNotes('Lookup');
         assert.ok(notes !== null, 'Lookup mcnNotes should be non-null');
@@ -455,22 +455,22 @@ describe('lookup_ampscript_function MCN fields', () => {
     });
 
     test('Add: getMcnApiVersion returns 67 and getMcnNotes returns null', () => {
-        const fn = sfmcLanguageService.lookupAmpscriptFunction('Add');
-        assert.ok(fn, 'Add should be found');
+        const function_ = sfmcLanguageService.lookupAmpscriptFunction('Add');
+        assert.ok(function_, 'Add should be found');
         assert.equal(getMcnApiVersion('Add'), 67, 'Add mcnSince should be 67');
         assert.equal(getMcnNotes('Add'), null, 'Add mcnNotes should be null');
     });
 
     test('AttachFile: getMcnApiVersion returns null and getMcnNotes returns null', () => {
-        const fn = sfmcLanguageService.lookupAmpscriptFunction('AttachFile');
-        assert.ok(fn, 'AttachFile should be found');
+        const function_ = sfmcLanguageService.lookupAmpscriptFunction('AttachFile');
+        assert.ok(function_, 'AttachFile should be found');
         assert.equal(getMcnApiVersion('AttachFile'), null, 'AttachFile mcnSince should be null');
         assert.equal(getMcnNotes('AttachFile'), null, 'AttachFile mcnNotes should be null');
     });
 
     test('FormatDate: getMcnNotes mentions Java SimpleDateFormat', () => {
-        const fn = sfmcLanguageService.lookupAmpscriptFunction('FormatDate');
-        assert.ok(fn, 'FormatDate should be found');
+        const function_ = sfmcLanguageService.lookupAmpscriptFunction('FormatDate');
+        assert.ok(function_, 'FormatDate should be found');
         assert.equal(getMcnApiVersion('FormatDate'), 67, 'FormatDate mcnSince should be 67');
         const notes = getMcnNotes('FormatDate');
         assert.ok(notes !== null, 'FormatDate mcnNotes should be non-null');
@@ -577,11 +577,11 @@ describe('check_mcn_compatibility tool logic', () => {
 // ---------------------------------------------------------------------------
 
 describe('rewrite_for_mcn tool logic', () => {
-    const opts = { isMcnSupportedFn: isMcnSupported, getMcnNotesFn: getMcnNotes };
+    const options = { isMcnSupportedFn: isMcnSupported, getMcnNotesFn: getMcnNotes };
 
     test('FormatDate(StringToDate(x), fmt) → FormatDate(x, fmt)', () => {
         const code = 'FormatDate(StringToDate(@startDate), "MM/dd/yyyy")';
-        const result = rewriteAmpForMcn(code, opts);
+        const result = rewriteAmpForMcn(code, options);
         assert.ok(
             result.rewrittenCode.includes('FormatDate(@startDate,'),
             `expected StringToDate to be stripped, got: ${result.rewrittenCode}`
@@ -592,7 +592,7 @@ describe('rewrite_for_mcn tool logic', () => {
 
     test('.NET tt format specifier → Java a', () => {
         const code = 'FormatDate(@d, "M/d/yyyy h:mm:ss tt")';
-        const result = rewriteAmpForMcn(code, opts);
+        const result = rewriteAmpForMcn(code, options);
         assert.ok(
             result.rewrittenCode.includes('a'),
             `expected 'tt' replaced with 'a', got: ${result.rewrittenCode}`
@@ -602,7 +602,7 @@ describe('rewrite_for_mcn tool logic', () => {
 
     test('MCE-only function annotated with NOT SUPPORTED IN MCN', () => {
         const code = 'InsertDE("MyDE", "Col", "Val")';
-        const result = rewriteAmpForMcn(code, opts);
+        const result = rewriteAmpForMcn(code, options);
         assert.ok(
             result.rewrittenCode.includes('NOT SUPPORTED IN MCN'),
             `expected NOT SUPPORTED annotation, got: ${result.rewrittenCode}`
@@ -612,7 +612,7 @@ describe('rewrite_for_mcn tool logic', () => {
     test('SSJS Platform.Function.Lookup → converted to AMPscript Lookup', () => {
         const code =
             '<script runat="server">Platform.Function.Lookup("DE","ret","k","v");</script>';
-        const result = rewriteAmpForMcn(code, opts);
+        const result = rewriteAmpForMcn(code, options);
         assert.ok(
             result.rewrittenCode.includes('Lookup(') ||
                 result.rewrittenCode.includes('%%-- MANUAL_REWRITE_REQUIRED'),
@@ -622,7 +622,7 @@ describe('rewrite_for_mcn tool logic', () => {
 
     test('SSJS try/catch → flagged as MANUAL_REWRITE_REQUIRED', () => {
         const code = '<script runat="server">try { var x = 1; } catch(e) { Write(e); }</script>';
-        const result = rewriteAmpForMcn(code, opts);
+        const result = rewriteAmpForMcn(code, options);
         assert.ok(
             result.nonMigratableItems.length > 0 ||
                 result.rewrittenCode.includes('MANUAL_REWRITE_REQUIRED'),
@@ -632,7 +632,7 @@ describe('rewrite_for_mcn tool logic', () => {
 
     test('context: cloudpage → returns not-migratable immediately', () => {
         const code = 'CloudPagesURL(1234)';
-        const result = rewriteAmpForMcn(code, { ...opts, context: 'cloudpage' });
+        const result = rewriteAmpForMcn(code, { ...options, context: 'cloudpage' });
         assert.equal(
             result.difficulty,
             'not-migratable',
@@ -642,7 +642,7 @@ describe('rewrite_for_mcn tool logic', () => {
 
     test('MCN-supported function with no notes → no changes', () => {
         const code = 'Concat("hello", " world")';
-        const result = rewriteAmpForMcn(code, opts);
+        const result = rewriteAmpForMcn(code, options);
         assert.equal(result.changes.length, 0, 'Concat needs no changes for MCN compatibility');
         assert.equal(result.difficulty, 'ready', 'simple MCN-supported code should be ready');
     });
@@ -969,7 +969,7 @@ describe('conversion-rules mapping tables', () => {
             'expected at least one replacement rule'
         );
         const [ttPattern, ttReplacement] = DOTNET_TO_JAVA_FORMAT_REPLACEMENTS[0];
-        const result = 'h:mm:ss tt'.replace(ttPattern, ttReplacement);
+        const result = 'h:mm:ss tt'.replace(ttPattern, () => ttReplacement);
         assert.ok(result.includes('a'), `expected 'tt' replaced with 'a', got: ${result}`);
         assert.ok(!result.includes(' tt'), `expected no ' tt' remaining, got: ${result}`);
     });
@@ -1037,21 +1037,21 @@ describe('detect_sfmc_platform tool logic', () => {
     });
 
     test('returns "unknown" for a directory with neither sentinel file', () => {
-        const tmp = mkdtempSync(join(tmpdir(), 'sfmc-test-'));
-        assert.equal(detectPlatform(tmp), 'unknown');
+        const temporary = mkdtempSync(join(tmpdir(), 'sfmc-test-'));
+        assert.equal(detectPlatform(temporary), 'unknown');
     });
 
     test('returns "next" when sfdx-project.json exists', () => {
-        const tmp = mkdtempSync(join(tmpdir(), 'sfmc-mcn-'));
-        writeFileSync(join(tmp, 'sfdx-project.json'), '{}');
-        assert.equal(detectPlatform(tmp), 'next');
+        const temporary = mkdtempSync(join(tmpdir(), 'sfmc-mcn-'));
+        writeFileSync(join(temporary, 'sfdx-project.json'), '{}');
+        assert.equal(detectPlatform(temporary), 'next');
     });
 
     test('engagement takes precedence over next when both sentinels exist', () => {
-        const tmp = mkdtempSync(join(tmpdir(), 'sfmc-both-'));
-        writeFileSync(join(tmp, '.mcdevrc.json'), '{}');
-        writeFileSync(join(tmp, 'sfdx-project.json'), '{}');
-        assert.equal(detectPlatform(tmp), 'engagement');
+        const temporary = mkdtempSync(join(tmpdir(), 'sfmc-both-'));
+        writeFileSync(join(temporary, '.mcdevrc.json'), '{}');
+        writeFileSync(join(temporary, 'sfdx-project.json'), '{}');
+        assert.equal(detectPlatform(temporary), 'engagement');
     });
 });
 
@@ -1212,8 +1212,8 @@ describe('get_ssjs_completions target:next tool logic', () => {
 describe('suggest_fix target:next tool logic', () => {
     test('validates with MCN target and reports MCN-unsupported function', () => {
         const code = '%%[ SET @ca = ContentArea(123) ]%%';
-        const doc = { text: code, languageId: 'ampscript', uri: 'fix-target' };
-        const diags = sfmcLanguageService.validate(doc, {
+        const document = { text: code, languageId: 'ampscript', uri: 'fix-target' };
+        const diags = sfmcLanguageService.validate(document, {
             maxNumberOfProblems: 50,
             targetPlatform: 'next',
         });
@@ -1228,8 +1228,8 @@ describe('suggest_fix target:next tool logic', () => {
 
     test('validates SSJS with MCN target and flags it', () => {
         const code = '<script runat="server">var x = 1;</script>';
-        const doc = { text: code, languageId: 'ssjs', uri: 'fix-target' };
-        const diags = sfmcLanguageService.validate(doc, {
+        const document = { text: code, languageId: 'ssjs', uri: 'fix-target' };
+        const diags = sfmcLanguageService.validate(document, {
             maxNumberOfProblems: 50,
             targetPlatform: 'next',
         });
@@ -1308,19 +1308,19 @@ describe('search_help unified wrapper', () => {
 
 describe('MCP Registry manifest', () => {
     test('mcpName matches server.json name', () => {
-        const pkg = readRepoJson('package.json');
+        const package_ = readRepoJson('package.json');
         const server = readRepoJson('server.json');
-        assert.equal(pkg.mcpName, server.name);
-        assert.equal(pkg.mcpName, 'io.github.JoernBerkefeld/mcp-server-sfmc');
+        assert.equal(package_.mcpName, server.name);
+        assert.equal(package_.mcpName, 'io.github.JoernBerkefeld/mcp-server-sfmc');
     });
 
     test('versions and npm package row match package.json', () => {
-        const pkg = readRepoJson('package.json');
+        const package_ = readRepoJson('package.json');
         const server = readRepoJson('server.json');
-        assert.equal(server.version, pkg.version);
+        assert.equal(server.version, package_.version);
         assert.equal(server.packages.length, 1);
-        assert.equal(server.packages[0].version, pkg.version);
-        assert.equal(server.packages[0].identifier, pkg.name);
+        assert.equal(server.packages[0].version, package_.version);
+        assert.equal(server.packages[0].identifier, package_.name);
         assert.equal(server.packages[0].registryType, 'npm');
         assert.equal(server.packages[0].transport.type, 'stdio');
     });
@@ -1344,8 +1344,8 @@ describe('Handlebars conversion maps (data-driven)', () => {
             (f) => typeof f.handlebarsEquivalent === 'string' && f.handlebarsEquivalent.length > 0
         ).map((f) => f.name.toLowerCase());
         assert.deepEqual(
-            Object.keys(AMP_TO_HANDLEBARS).sort(),
-            expectedKeys.sort(),
+            Object.keys(AMP_TO_HANDLEBARS).sort((a, b) => a.localeCompare(b)),
+            expectedKeys.sort((a, b) => a.localeCompare(b)),
             'AMP_TO_HANDLEBARS keys must match ampscript-data handlebarsEquivalent entries'
         );
         assert.ok(Object.keys(AMP_TO_HANDLEBARS).length > 0, 'expected at least one mapped helper');
@@ -1376,7 +1376,10 @@ describe('Handlebars conversion maps (data-driven)', () => {
         const expected = AMPSCRIPT_FUNCTIONS.filter((f) => f.mcnHandlebarsGap === true).map((f) =>
             f.name.toLowerCase()
         );
-        assert.deepEqual([...AMP_MCN_HANDLEBARS_GAP].sort(), expected.sort());
+        assert.deepEqual(
+            [...AMP_MCN_HANDLEBARS_GAP].sort((a, b) => a.localeCompare(b)),
+            expected.sort((a, b) => a.localeCompare(b))
+        );
         assert.ok(
             AMP_MCN_HANDLEBARS_GAP.has('contentblockbykey'),
             'ContentBlockByKey is a known gap'

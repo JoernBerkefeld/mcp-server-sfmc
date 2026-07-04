@@ -57,11 +57,24 @@ function projectPackageRoot(): string {
     return path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 }
 
-const pkg = JSON.parse(
-    fs.readFileSync(path.join(projectPackageRoot(), 'package.json'), 'utf8')
-) as {
+const packageJsonPath = path.join(projectPackageRoot(), 'package.json');
+const package_ = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as {
     version: string;
 };
+
+/**
+ * Normalize a completion item's `label` (which may be a string or a
+ * `{ label: string }` object) to its plain-string form.
+ * @param item - A completion item with a string or object label.
+ * @param item.label
+ * @returns {string} The label text.
+ */
+function labelText(item: { label: string | { label: string } }): string {
+    if (typeof item.label === 'string') {
+        return item.label;
+    }
+    return item.label.label;
+}
 
 // ---------------------------------------------------------------------------
 // Server instance
@@ -129,7 +142,7 @@ const SERVER_INSTRUCTIONS =
     'which doc index to target.';
 
 const server = new McpServer(
-    { name: 'mcp-server-sfmc', version: pkg.version },
+    { name: 'mcp-server-sfmc', version: package_.version },
     { instructions: SERVER_INSTRUCTIONS }
 );
 
@@ -159,24 +172,36 @@ function detectLanguage(code: string, hint?: LanguageId): 'ampscript' | 'ssjs' {
     return 'ampscript';
 }
 
+/**
+ * Extracts the human-readable text from a diagnostic message, which may be a
+ * plain string or a `{ value }` wrapper depending on the language-service type.
+ * @param message
+ */
+function diagnosticMessage(message: unknown): string {
+    if (typeof message === 'string') {
+        return message;
+    }
+    return (message as { value: string }).value;
+}
+
 function formatDiagnostics(diagnostics: ReturnType<typeof validateAmpscript>): string {
     if (diagnostics.length === 0) return 'No issues found.';
     return diagnostics
         .map((d) => {
             const sev = d.severity === 1 ? 'ERROR' : d.severity === 2 ? 'WARNING' : 'INFO';
             const loc = `line ${d.range.start.line + 1}, col ${d.range.start.character + 1}`;
-            const message = typeof d.message === 'string' ? d.message : d.message.value;
+            const message = diagnosticMessage(d.message);
             return `[${sev}] ${loc}: ${message}`;
         })
         .join('\n');
 }
 
 function formatHandlebarsHelper(helper: HandlebarsHelper): string {
-    const params = helper.params
+    const parameters = helper.params
         .map((p) => {
-            const req = p.optional ? '(optional)' : '(required)';
+            const request = p.optional ? '(optional)' : '(required)';
             const variadic = p.variadic ? ' (variadic)' : '';
-            return `  - ${p.name}: ${p.type}${variadic} ${req}${p.description ? ' — ' + p.description : ''}`;
+            return `  - ${p.name}: ${p.type}${variadic} ${request}${p.description ? ' — ' + p.description : ''}`;
         })
         .join('\n');
 
@@ -191,7 +216,7 @@ function formatHandlebarsHelper(helper: HandlebarsHelper): string {
         `**Type:** ${helper.helperType}\n\n` +
         `**Returns:** ${helper.returnType}\n\n` +
         `**Description:** ${helper.description}\n\n` +
-        `**Parameters:**\n${params || '  (none)'}` +
+        `**Parameters:**\n${parameters || '  (none)'}` +
         subexpr +
         `\n\n✅ **Marketing Cloud Next:** Supported since API v${helper.mcnSince}.0` +
         (helper.docUrl ? `\n\n[Documentation](${helper.docUrl})` : '')
@@ -331,34 +356,34 @@ server.tool(
         name: z.string().describe('The AMPscript function name, e.g. "Lookup", "DateAdd", "IIf".'),
     },
     ({ name }) => {
-        const fn = sfmcLanguageService.lookupAmpscriptFunction(name);
-        if (!fn) {
+        const function_ = sfmcLanguageService.lookupAmpscriptFunction(name);
+        if (!function_) {
             return { content: [{ type: 'text', text: `AMPscript function "${name}" not found.` }] };
         }
 
-        const params = fn.params
+        const parameters = function_.params
             .map((p: { name: string; type?: string; optional?: boolean; description?: string }) => {
-                const req = p.optional ? '(optional)' : '(required)';
-                return `  - ${p.name}: ${p.type ?? 'any'} ${req}${p.description ? ' — ' + p.description : ''}`;
+                const request = p.optional ? '(optional)' : '(required)';
+                return `  - ${p.name}: ${p.type ?? 'any'} ${request}${p.description ? ' — ' + p.description : ''}`;
             })
             .join('\n');
 
-        const examples = fn.example ? '\n\nExample:\n' + fn.example : '';
+        const examples = function_.example ? '\n\nExample:\n' + function_.example : '';
 
         // MCN compatibility badge
-        const fnMcnSince = (fn as { mcnSince?: number | null }).mcnSince ?? null;
-        const fnMcnNotes = (fn as { mcnNotes?: string | null }).mcnNotes ?? null;
+        const functionMcnSince = (function_ as { mcnSince?: number | null }).mcnSince ?? null;
+        const functionMcnNotes = (function_ as { mcnNotes?: string | null }).mcnNotes ?? null;
         const mcnLine =
-            fnMcnSince === null
+            functionMcnSince === null
                 ? '\n\n❌ **Marketing Cloud Next:** Not supported'
-                : `\n\n✅ **Marketing Cloud Next:** Supported since API v${fnMcnSince}.0` +
-                  (fnMcnNotes ? `\n> **MCN Note:** ${fnMcnNotes}` : '');
+                : `\n\n✅ **Marketing Cloud Next:** Supported since API v${functionMcnSince}.0` +
+                  (functionMcnNotes ? `\n> **MCN Note:** ${functionMcnNotes}` : '');
 
         const text =
-            `## ${fn.name}\n\n` +
-            `**Category:** ${fn.category ?? 'Unknown'}\n\n` +
-            `**Description:** ${fn.description ?? ''}\n\n` +
-            `**Parameters:**\n${params || '  (none)'}` +
+            `## ${function_.name}\n\n` +
+            `**Category:** ${function_.category ?? 'Unknown'}\n\n` +
+            `**Description:** ${function_.description ?? ''}\n\n` +
+            `**Parameters:**\n${parameters || '  (none)'}` +
             examples +
             mcnLine;
 
@@ -723,14 +748,14 @@ server.tool(
             /^(Platform\.(Function|Variable|Response|Request|ClientBrowser|Recipient|DateTime)\.|WSProxy\.|HTTP\.|Script\.Util\.|Function\.|Variable\.|Response\.|Request\.)/i,
             ''
         );
-        const fn = sfmcLanguageService.lookupSsjsFunction(bare);
-        if (!fn) {
+        const function_ = sfmcLanguageService.lookupSsjsFunction(bare);
+        if (!function_) {
             // Fall through to the ECMAScript built-in / polyfill / unsupported catalogs.
             const builtinResult = lookupSsjsBuiltin(name, owner);
             return { content: [{ type: 'text', text: builtinResult.text }] };
         }
 
-        const params = (fn.params ?? [])
+        const parameters = (function_.params ?? [])
             .map(
                 (p: {
                     name: string;
@@ -740,33 +765,35 @@ server.tool(
                     description?: string;
                 }) => {
                     const isOptional = p.optional || p.required === false;
-                    const req = isOptional ? '(optional)' : '(required)';
-                    return `  - ${p.name}: ${p.type ?? 'any'} ${req}${p.description ? ' — ' + p.description : ''}`;
+                    const request = isOptional ? '(optional)' : '(required)';
+                    return `  - ${p.name}: ${p.type ?? 'any'} ${request}${p.description ? ' — ' + p.description : ''}`;
                 }
             )
             .join('\n');
 
         const badges: string[] = [];
-        if (fn.deprecated) {
+        if (function_.deprecated) {
             badges.push('⚠️ **Deprecated** — avoid in new code.');
         }
-        if (fn.requiresCoreLoad) {
+        if (function_.requiresCoreLoad) {
             badges.push(
                 '⚠️ **Requires** `Platform.Load("core", "1.1.5")` before calling this method.'
             );
         }
 
-        const header = fn.isStatic ? `## ${fn.name} *(static)*` : `## ${fn.name}`;
+        const header = function_.isStatic
+            ? `## ${function_.name} *(static)*`
+            : `## ${function_.name}`;
         const badgeBlock = badges.length > 0 ? badges.join('\n') + '\n\n' : '';
-        const aliasLine = fn.aliasOf ? `**Alias of:** \`${fn.aliasOf}\`\n\n` : '';
+        const aliasLine = function_.aliasOf ? `**Alias of:** \`${function_.aliasOf}\`\n\n` : '';
 
         const text =
             `${header}\n\n` +
             badgeBlock +
             aliasLine +
-            `**Description:** ${fn.description ?? ''}\n\n` +
-            `**Parameters:**\n${params || '  (none)'}\n\n` +
-            `**Returns:** ${fn.returnType ?? 'void'}`;
+            `**Description:** ${function_.description ?? ''}\n\n` +
+            `**Parameters:**\n${parameters || '  (none)'}\n\n` +
+            `**Returns:** ${function_.returnType ?? 'void'}`;
 
         return { content: [{ type: 'text', text }] };
     }
@@ -798,14 +825,14 @@ server.tool(
     ({ diff, language = 'auto', maxProblems = 50 }) => {
         // Extract added lines from the unified diff
         const addedLines: string[] = [];
-        let lineNum = 0;
+        let lineNumber = 0;
         const lineMap: number[] = []; // maps index in addedLines to original diff line number
 
         for (const line of diff.split('\n')) {
-            lineNum++;
+            lineNumber++;
             if (line.startsWith('+') && !line.startsWith('+++')) {
                 addedLines.push(line.slice(1));
-                lineMap.push(lineNum);
+                lineMap.push(lineNumber);
             }
         }
 
@@ -822,8 +849,8 @@ server.tool(
                   : (language as 'ampscript' | 'ssjs');
 
         const settings: SfmcSettings = { maxNumberOfProblems: maxProblems };
-        const doc = { text: addedCode, languageId: detectedLang, uri: 'diff' };
-        const diagnostics = sfmcLanguageService.validate(doc, settings);
+        const document = { text: addedCode, languageId: detectedLang, uri: 'diff' };
+        const diagnostics = sfmcLanguageService.validate(document, settings);
 
         if (diagnostics.length === 0) {
             return {
@@ -840,7 +867,7 @@ server.tool(
         for (const d of diagnostics) {
             const sev = d.severity === 1 ? '🔴 ERROR' : d.severity === 2 ? '🟡 WARNING' : '🔵 INFO';
             const origLine = lineMap[d.range.start.line] ?? d.range.start.line + 1;
-            const message = typeof d.message === 'string' ? d.message : d.message.value;
+            const message = diagnosticMessage(d.message);
             output.push(`${sev} (diff line ${origLine}): ${message}`);
         }
 
@@ -880,8 +907,8 @@ server.tool(
                 ? detectLanguage(code)
                 : detectLanguage(code, language as LanguageId);
         const settings: SfmcSettings = { maxNumberOfProblems: 50, targetPlatform: target };
-        const doc = { text: code, languageId: detectedLang, uri: 'fix-target' };
-        const diagnostics = sfmcLanguageService.validate(doc, settings);
+        const document = { text: code, languageId: detectedLang, uri: 'fix-target' };
+        const diagnostics = sfmcLanguageService.validate(document, settings);
 
         const lines = code.split('\n');
         const suggestions: string[] = [];
@@ -890,7 +917,7 @@ server.tool(
             const lineText = lines[d.range.start.line] ?? '';
             // Diagnostic.message widened to `string | MarkupContent` in newer LSP types; the
             // SFMC language service only emits plain strings, so unwrap MarkupContent to its value.
-            const message = typeof d.message === 'string' ? d.message : d.message.value;
+            const message = diagnosticMessage(d.message);
             suggestions.push(
                 `Line ${d.range.start.line + 1}: ${message}\n` +
                     `  Code: ${lineText.trim()}\n` +
@@ -948,9 +975,9 @@ function getFixSuggestion(message: string, line: string, lang: 'ampscript' | 'ss
     if (m.includes('html comment'))
         return 'Remove the `<!-- -->` wrapper; use `/* comment */` inside AMPscript.';
     if (m.includes('unknown function')) {
-        const fnMatch = message.match(/"([^"]+)"/);
-        if (fnMatch)
-            return `Check spelling — did you mean a known AMPscript function? ("${fnMatch[1]}")`;
+        const functionMatch = message.match(/"([^"]+)"/);
+        if (functionMatch)
+            return `Check spelling — did you mean a known AMPscript function? ("${functionMatch[1]}")`;
     }
     if (m.includes('expects'))
         return 'Check the number and types of arguments against the function signature.';
@@ -979,15 +1006,12 @@ server.tool(
             ),
     },
     ({ code, line, character, target }) => {
-        const doc = { text: code, languageId: 'ampscript' as const, uri: 'completions' };
-        let items = sfmcLanguageService.getCompletions(doc, { line, character });
+        const document = { text: code, languageId: 'ampscript' as const, uri: 'completions' };
+        let items = sfmcLanguageService.getCompletions(document, { line, character });
 
         if (target === 'next') {
             items = items.filter((item) => {
-                const label =
-                    typeof item.label === 'string'
-                        ? item.label
-                        : (item.label as { label: string }).label;
+                const label = labelText(item);
                 // Keep keywords and variables (non-function entries); filter out MCN-unsupported functions
                 return !label.includes('(') || isMcnSupported(label.replace(/\(.*/, '').trim());
             });
@@ -996,10 +1020,7 @@ server.tool(
         const formatted = items
             .slice(0, 50)
             .map((item) => {
-                const label =
-                    typeof item.label === 'string'
-                        ? item.label
-                        : (item.label as { label: string }).label;
+                const label = labelText(item);
                 return `- ${label}${item.detail ? ` — ${item.detail}` : ''}`;
             })
             .join('\n');
@@ -1054,22 +1075,13 @@ server.tool(
 
         const items = sfmcLanguageService.getSsjsCompletionCatalog();
         const filtered = filter
-            ? items.filter((item) => {
-                  const label =
-                      typeof item.label === 'string'
-                          ? item.label
-                          : (item.label as { label: string }).label;
-                  return label.toLowerCase().startsWith(filter.toLowerCase());
-              })
+            ? items.filter((item) => labelText(item).toLowerCase().startsWith(filter.toLowerCase()))
             : items;
 
         const formatted = filtered
             .slice(0, 80)
             .map((item) => {
-                const label =
-                    typeof item.label === 'string'
-                        ? item.label
-                        : (item.label as { label: string }).label;
+                const label = labelText(item);
                 return `- ${label}${item.detail ? ` — ${item.detail}` : ''}`;
             })
             .join('\n');
@@ -1106,22 +1118,13 @@ server.tool(
     ({ filter }) => {
         const items = sfmcLanguageService.getHandlebarsCompletionCatalog();
         const filtered = filter
-            ? items.filter((item) => {
-                  const label =
-                      typeof item.label === 'string'
-                          ? item.label
-                          : (item.label as { label: string }).label;
-                  return label.toLowerCase().startsWith(filter.toLowerCase());
-              })
+            ? items.filter((item) => labelText(item).toLowerCase().startsWith(filter.toLowerCase()))
             : items;
 
         const formatted = filtered
             .slice(0, 80)
             .map((item) => {
-                const label =
-                    typeof item.label === 'string'
-                        ? item.label
-                        : (item.label as { label: string }).label;
+                const label = labelText(item);
                 return `- ${label}${item.detail ? ` — ${item.detail}` : ''}`;
             })
             .join('\n');
@@ -1265,10 +1268,10 @@ server.tool(
                     : `No matches for this query with product_focus="${focus}". Try broader keywords or product_focus="any".`;
             return { content: [{ type: 'text', text: hint }] };
         }
-        const lines = hits.map((h, i) => {
+        const lines = hits.map((h, index) => {
             const excerpt = h.chunk.body.replaceAll(/\s+/g, ' ').slice(0, 520);
             return (
-                `### ${i + 1}. ${h.chunk.relativePath} — ${h.chunk.heading}\n` +
+                `### ${index + 1}. ${h.chunk.relativePath} — ${h.chunk.heading}\n` +
                 `**Product:** ${h.chunk.productLabel}\n` +
                 `**Score:** ${h.score}\n\n` +
                 `${excerpt}${h.chunk.body.length > 520 ? '…' : ''}\n`
@@ -1286,13 +1289,13 @@ server.tool(
 
 server.resource('ampscript-function-catalog', 'sfmc://ampscript/functions', async () => {
     const functions = sfmcLanguageService.getAllAmpscriptFunctions();
-    const lines = functions.map((fn) => {
-        const paramList = fn.params
+    const lines = functions.map((function_) => {
+        const parameterList = function_.params
             .map((p: { name: string; type?: string; optional?: boolean }) =>
                 p.optional ? `[${p.name}: ${p.type ?? 'any'}]` : `${p.name}: ${p.type ?? 'any'}`
             )
             .join(', ');
-        return `${fn.name}(${paramList}) — ${fn.description ?? ''}`;
+        return `${function_.name}(${parameterList}) — ${function_.description ?? ''}`;
     });
     return {
         contents: [
@@ -1313,15 +1316,15 @@ server.resource('ampscript-function-catalog', 'sfmc://ampscript/functions', asyn
 
 server.resource('ssjs-function-catalog', 'sfmc://ssjs/functions', async () => {
     const functions = sfmcLanguageService.getAllSsjsFunctions();
-    const lines = functions.map((fn) => {
-        const paramList = (fn.params ?? [])
+    const lines = functions.map((function_) => {
+        const parameterList = (function_.params ?? [])
             .map((p: { name: string; type?: string; required?: boolean; optional?: boolean }) =>
                 p.optional || p.required === false
                     ? `[${p.name}: ${p.type ?? 'any'}]`
                     : `${p.name}: ${p.type ?? 'any'}`
             )
             .join(', ');
-        return `${fn.name}(${paramList}) — ${fn.description ?? ''}`;
+        return `${function_.name}(${parameterList}) — ${function_.description ?? ''}`;
     });
     return {
         contents: [
@@ -1343,13 +1346,13 @@ server.resource('ssjs-function-catalog', 'sfmc://ssjs/functions', async () => {
 server.resource('handlebars-helper-catalog', 'sfmc://handlebars/helpers', async () => {
     const helpers = sfmcLanguageService.listHandlebarsHelpers();
     const lines = helpers.map((h) => {
-        const paramList = h.params
+        const parameterList = h.params
             .map((p) => {
                 const inner = `${p.name}: ${p.type}`;
                 return p.optional ? `[${inner}]` : inner;
             })
             .join(', ');
-        return `{{${h.name} ${paramList}}} — (${h.category}, ${h.origin}, v${h.mcnSince}.0+) ${h.description}`;
+        return `{{${h.name} ${parameterList}}} — (${h.category}, ${h.origin}, v${h.mcnSince}.0+) ${h.description}`;
     });
     return {
         contents: [
@@ -1480,7 +1483,9 @@ server.resource('mce-product-context', 'sfmc://mce/product-context', async () =>
 
 server.resource('mce-help-index', 'sfmc://mce/help-index', async () => {
     const chunks = getChunks();
-    const files = [...new Set(chunks.map((c) => c.relativePath))].sort();
+    const files = [...new Set(chunks.map((c) => c.relativePath))].sort((a, b) =>
+        a.localeCompare(b)
+    );
     const stats = getMceHelpStats();
     const scopeRows = Object.entries(stats.breakdown)
         .sort(([, a], [, b]) => b - a)
@@ -1502,7 +1507,9 @@ server.resource('mce-help-index', 'sfmc://mce/help-index', async () => {
 
 server.resource('mcn-help-index', 'sfmc://mcn/help-index', async () => {
     const chunks = getMcnChunks();
-    const files = [...new Set(chunks.map((c) => c.relativePath))].sort();
+    const files = [...new Set(chunks.map((c) => c.relativePath))].sort((a, b) =>
+        a.localeCompare(b)
+    );
     const stats = getMcnHelpStats();
     const text =
         `# Bundled Marketing Cloud Next developer API docs (${stats.chunkCount} sections from ${stats.fileCount} files)\n\n` +
@@ -1639,21 +1646,21 @@ server.tool(
 
         if (platform === 'next') {
             // MCN: search both the developer API reference and the MCN operational/admin help
-            const devHits = searchMcnHelp(query, Math.ceil(limit / 2));
+            const developmentHits = searchMcnHelp(query, Math.ceil(limit / 2));
             const opsHits = searchMceHelp(query, Math.floor(limit / 2), 'next' as MceProductFocus);
 
-            if (devHits.length > 0) {
-                const parts = devHits.map(
+            if (developmentHits.length > 0) {
+                const parts = developmentHits.map(
                     ({ chunk }) =>
                         `### ${chunk.heading}\n*Source: ${chunk.relativePath}*\n\n${chunk.body}`
                 );
                 sections.push(`## MCN Developer API Docs\n\n${parts.join('\n\n---\n\n')}`);
             }
             if (opsHits.length > 0) {
-                const parts = opsHits.map((h, i) => {
+                const parts = opsHits.map((h, index) => {
                     const excerpt = h.chunk.body.replaceAll(/\s+/g, ' ').slice(0, 520);
                     return (
-                        `### ${i + 1}. ${h.chunk.relativePath} — ${h.chunk.heading}\n` +
+                        `### ${index + 1}. ${h.chunk.relativePath} — ${h.chunk.heading}\n` +
                         `**Score:** ${h.score}\n\n` +
                         `${excerpt}${h.chunk.body.length > 520 ? '…' : ''}`
                     );
@@ -1685,10 +1692,10 @@ server.tool(
                         : `No results found for "${query}". Try broader keywords.`;
                 return { content: [{ type: 'text', text: hint }] };
             }
-            const parts = hits.map((h, i) => {
+            const parts = hits.map((h, index) => {
                 const excerpt = h.chunk.body.replaceAll(/\s+/g, ' ').slice(0, 520);
                 return (
-                    `### ${i + 1}. ${h.chunk.relativePath} — ${h.chunk.heading}\n` +
+                    `### ${index + 1}. ${h.chunk.relativePath} — ${h.chunk.heading}\n` +
                     `**Product:** ${h.chunk.productLabel}\n` +
                     `**Score:** ${h.score}\n\n` +
                     `${excerpt}${h.chunk.body.length > 520 ? '…' : ''}`
@@ -1894,6 +1901,24 @@ server.prompt(
             target === 'next'
                 ? '\n- **Marketing Cloud Next compatibility**: Flag any AMPscript functions not supported in MCN (API v67.0+), and any SSJS blocks (SSJS is not supported in MCN).'
                 : '';
+        const fenceLang = detectedLang === 'ssjs' ? 'javascript' : detectedLang;
+        const checklistItems =
+            detectedLang === 'ampscript'
+                ? [
+                      '- Delimiter balance (%%[ ]%%, %%= =%%)',
+                      '- IF/ENDIF, FOR/NEXT block balance',
+                      '- Correct function names and argument counts',
+                      '- Correct comment syntax (/* */ only)',
+                      '- Proper variable declaration with @',
+                  ]
+                : [
+                      '- No ES6+ syntax (var, not let/const; no arrow functions)',
+                      '- Platform.Load before Core library objects',
+                      '- Correct Platform.Function calls',
+                      '- WSProxy error handling',
+                      '- No sensitive data in logs or responses',
+                  ];
+        const checklist = checklistItems.join('\n') + platformNote;
         return {
             messages: [
                 {
@@ -1910,26 +1935,12 @@ server.prompt(
                             focus ? `Focus especially on: ${focus}` : '',
                             '',
                             '## Code to Review',
-                            '```' + (detectedLang === 'ssjs' ? 'javascript' : detectedLang),
+                            '```' + fenceLang,
                             code,
                             '```',
                             '',
                             '## Review checklist',
-                            detectedLang === 'ampscript'
-                                ? [
-                                      '- Delimiter balance (%%[ ]%%, %%= =%%)',
-                                      '- IF/ENDIF, FOR/NEXT block balance',
-                                      '- Correct function names and argument counts',
-                                      '- Correct comment syntax (/* */ only)',
-                                      '- Proper variable declaration with @',
-                                  ].join('\n') + platformNote
-                                : [
-                                      '- No ES6+ syntax (var, not let/const; no arrow functions)',
-                                      '- Platform.Load before Core library objects',
-                                      '- Correct Platform.Function calls',
-                                      '- WSProxy error handling',
-                                      '- No sensitive data in logs or responses',
-                                  ].join('\n') + platformNote,
+                            checklist,
                         ]
                             .filter(Boolean)
                             .join('\n'),
@@ -2067,6 +2078,60 @@ server.prompt(
 // Tool: check_mcn_compatibility
 // ---------------------------------------------------------------------------
 
+const mcnFileObjectSchema = z.object({
+    filename: z.string().describe('File name (e.g. "email-template.html").'),
+    content: z.string().describe('Full file content to analyze.'),
+});
+const mcnFileArraySchema = z.array(mcnFileObjectSchema).describe('List of files to analyze.');
+
+/**
+ * Returns the reason for the first non-migratable SSJS pattern that matches the
+ * given block code, or an empty string when none match.
+ * @param blockCode
+ */
+function firstNonMigratableSsjsReason(blockCode: string): string {
+    for (const { pattern, reason } of NON_MIGRATABLE_SSJS_PATTERNS) {
+        pattern.lastIndex = 0;
+        if (pattern.test(blockCode)) {
+            return reason;
+        }
+    }
+    return '';
+}
+
+interface HandlebarsHelperUsage {
+    name: string;
+    line: number;
+    mcnSince: number;
+}
+
+/**
+ * Scans content for recognized Handlebars helper usages, deduplicated by
+ * helper name and approximate line. Matching is data-driven via the LSP lookup.
+ * @param content
+ */
+function collectHandlebarsHelperUsages(content: string): HandlebarsHelperUsage[] {
+    const helperCallPattern = /\{\{[#/]?\s*([a-zA-Z][\w-]*)/g;
+    const seenHelper = new Set<string>();
+    const usages: HandlebarsHelperUsage[] = [];
+    let helperMatch: RegExpExecArray | null;
+    while ((helperMatch = helperCallPattern.exec(content)) !== null) {
+        const token = helperMatch[1];
+        const helper = sfmcLanguageService.lookupHandlebarsHelper(token);
+        if (!helper) {
+            continue;
+        }
+        const line = content.slice(0, helperMatch.index).split('\n').length;
+        const dedupeKey = `${helper.name}@${line}`;
+        if (seenHelper.has(dedupeKey)) {
+            continue;
+        }
+        seenHelper.add(dedupeKey);
+        usages.push({ name: helper.name, line, mcnSince: helper.mcnSince });
+    }
+    return usages;
+}
+
 server.tool(
     'check_mcn_compatibility',
     'Analyze one or more AMPscript/HTML files for Marketing Cloud Next (MCN) readiness. ' +
@@ -2074,14 +2139,7 @@ server.tool(
         'SSJS blocks that only use Platform.Function.* calls are classified as "Needs conversion" (not "Not migratable"). ' +
         'Use this tool before using rewrite_for_mcn.',
     {
-        files: z
-            .array(
-                z.object({
-                    filename: z.string().describe('File name (e.g. "email-template.html").'),
-                    content: z.string().describe('Full file content to analyze.'),
-                })
-            )
-            .describe('List of files to analyze.'),
+        files: mcnFileArraySchema,
     },
     ({ files }) => {
         type AmpFunctionStatus = 'supported' | 'needs-review' | 'not-supported';
@@ -2106,12 +2164,6 @@ server.tool(
             line: number;
             severity: 'error' | 'warning' | 'info';
             message: string;
-        }
-
-        interface HandlebarsHelperUsage {
-            name: string;
-            line: number;
-            mcnSince: number;
         }
 
         interface FileResult {
@@ -2174,14 +2226,7 @@ server.tool(
                 const lineApprox = content.slice(0, blockMatch.index).split('\n').length;
 
                 // Check for non-migratable patterns
-                let notMigratableReason = '';
-                for (const { pattern, reason } of NON_MIGRATABLE_SSJS_PATTERNS) {
-                    pattern.lastIndex = 0;
-                    if (pattern.test(blockCode)) {
-                        notMigratableReason = reason;
-                        break;
-                    }
-                }
+                const notMigratableReason = firstNonMigratableSsjsReason(blockCode);
 
                 if (notMigratableReason) {
                     ssjsBlocks.push({
@@ -2214,7 +2259,7 @@ server.tool(
                 for (const d of hbsDiagnostics) {
                     const severity =
                         d.severity === 1 ? 'error' : d.severity === 2 ? 'warning' : 'info';
-                    const message = typeof d.message === 'string' ? d.message : d.message.value;
+                    const message = diagnosticMessage(d.message);
                     handlebarsProblems.push({
                         line: d.range.start.line + 1,
                         severity,
@@ -2225,27 +2270,11 @@ server.tool(
                 // Report recognized helper usages with their MCN availability version.
                 // Helper names are matched against handlebars-data via the LSP lookup so
                 // this stays data-driven (no hand-maintained helper list).
-                const helperCallPattern = /\{\{[#/]?\s*([a-zA-Z][\w-]*)/g;
-                const seenHelper = new Set<string>();
-                let helperMatch: RegExpExecArray | null;
-                while ((helperMatch = helperCallPattern.exec(content)) !== null) {
-                    const token = helperMatch[1];
-                    const helper = sfmcLanguageService.lookupHandlebarsHelper(token);
-                    if (!helper) {
-                        continue;
-                    }
-                    const line = content.slice(0, helperMatch.index).split('\n').length;
-                    const dedupeKey = `${helper.name}@${line}`;
-                    if (seenHelper.has(dedupeKey)) {
-                        continue;
-                    }
-                    seenHelper.add(dedupeKey);
-                    handlebarsHelpers.push({ name: helper.name, line, mcnSince: helper.mcnSince });
-                }
+                handlebarsHelpers.push(...collectHandlebarsHelperUsages(content));
             }
 
             // 3. Assess per-file difficulty
-            const hasCloudPagesFn = ampFunctions.some(
+            const hasCloudPagesFunction = ampFunctions.some(
                 (f) =>
                     CLOUDPAGES_ONLY_FUNCTIONS.has(f.name.toLowerCase()) &&
                     f.status === 'not-supported'
@@ -2262,7 +2291,7 @@ server.tool(
             const hasHandlebarsWarning = handlebarsProblems.some((p) => p.severity === 'warning');
 
             let difficulty: FileDifficulty;
-            if (hasCloudPagesFn || hasNotMigratableSsjs) {
+            if (hasCloudPagesFunction || hasNotMigratableSsjs) {
                 difficulty = 'not-migratable';
             } else if (hasUnsupportedAmp || hasConvertibleSsjs || hasHandlebarsError) {
                 difficulty = 'significant';
@@ -2341,21 +2370,21 @@ server.tool(
 
             if (result.ampFunctions.length > 0) {
                 fileLines.push('| Function | Line | Status | Reason |', '|---|---|---|---|');
-                for (const fn of result.ampFunctions) {
+                for (const function_ of result.ampFunctions) {
                     const icon =
-                        fn.status === 'supported'
+                        function_.status === 'supported'
                             ? '✅'
-                            : fn.status === 'needs-review'
+                            : function_.status === 'needs-review'
                               ? '⚠️'
                               : '❌';
                     const statusLabel =
-                        fn.status === 'supported'
+                        function_.status === 'supported'
                             ? 'Supported'
-                            : fn.status === 'needs-review'
+                            : function_.status === 'needs-review'
                               ? 'Needs review'
                               : 'Not supported';
                     fileLines.push(
-                        `| ${fn.name} | ${fn.line} | ${icon} ${statusLabel} | ${fn.reason} |`
+                        `| ${function_.name} | ${function_.line} | ${icon} ${statusLabel} | ${function_.reason} |`
                     );
                 }
             } else if (
@@ -2486,7 +2515,8 @@ server.tool(
         // Reassess difficulty
         const hasMigratable = allNonMigratable.length > 0;
         const difficulty: 'ready' | 'minor' | 'significant' | 'not-migratable' =
-            hasMigratable && allNonMigratable.some((i) => i.reason.includes('not-migratable'))
+            hasMigratable &&
+            allNonMigratable.some((index) => index.reason.includes('not-migratable'))
                 ? 'not-migratable'
                 : ampResult.difficulty;
 
@@ -3039,7 +3069,7 @@ server.tool(
                     text: JSON.stringify(
                         {
                             name: 'mcp-server-sfmc',
-                            version: pkg.version,
+                            version: package_.version,
                             mceHelp: { chunkCount: mce.chunkCount, fileCount: mceFileCount },
                             mcnHelp: { chunkCount: mcn.chunkCount, fileCount: mcn.fileCount },
                         },
@@ -3058,7 +3088,7 @@ server.tool(
 
 async function main(): Promise<void> {
     if (process.argv.includes('--version') || process.argv.includes('-v')) {
-        process.stdout.write(pkg.version + '\n');
+        process.stdout.write(package_.version + '\n');
         return;
     }
     const transport = new StdioServerTransport();
@@ -3066,7 +3096,9 @@ async function main(): Promise<void> {
     process.stderr.write('mcp-server-sfmc running on stdio\n');
 }
 
-main().catch((ex: unknown) => {
+try {
+    await main();
+} catch (ex: unknown) {
     process.stderr.write(`Fatal: ${String(ex)}\n`);
     process.exit(1);
-});
+}

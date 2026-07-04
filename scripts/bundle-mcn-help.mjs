@@ -54,7 +54,7 @@ function chunkMarkdownFile(fullPath, relPath) {
 
     const chunks = [];
     const parts = text.split(/\n(?=#{2,3}\s+)/);
-    let i = 0;
+    let index = 0;
     for (const part of parts) {
         const trimmed = part.trim();
         if (!trimmed) continue;
@@ -67,7 +67,7 @@ function chunkMarkdownFile(fullPath, relPath) {
         if (body.length > MAX_BODY) {
             body = `${body.slice(0, MAX_BODY)}\n\n…`;
         }
-        const id = `${relPath.replaceAll('\\', '/')}#${i++}`;
+        const id = `${relPath.replaceAll('\\', '/')}#${index++}`;
         chunks.push({
             id,
             file: fileBase,
@@ -124,7 +124,8 @@ function main() {
     }
 
     const all = [];
-    for (const full of files.sort()) {
+    const sortedFiles = [...files].sort((a, b) => a.localeCompare(b));
+    for (const full of sortedFiles) {
         const rel = path.relative(sourceDir, full);
         all.push(...chunkMarkdownFile(full, rel));
     }
