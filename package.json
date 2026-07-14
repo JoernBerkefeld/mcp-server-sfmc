@@ -3,7 +3,7 @@
     "version": "2.0.0",
     "mcpName": "io.github.JoernBerkefeld/mcp-server-sfmc",
     "description": "SFMC AMPscript/SSJS/GTL tools + searchable MCE and MCN developer docs, with full MCN platform support.",
-    "author": "JÃƒÂ¶rn Berkefeld",
+    "author": "Jörn Berkefeld",
     "license": "MIT",
     "repository": {
         "type": "git",
@@ -18,12 +18,22 @@
         "model-context-protocol",
         "ampscript",
         "ssjs",
+        "handlebars",
+        "gtl",
         "sfmc",
         "salesforce",
         "marketing-cloud",
+        "marketing-cloud-next",
+        "mcn",
         "ai",
         "copilot",
-        "code-review"
+        "code-review",
+        "code-conversion",
+        "migration",
+        "linter",
+        "validation",
+        "language-server",
+        "documentation-search"
     ],
     "type": "module",
     "bin": {
@@ -62,16 +72,17 @@
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
-        "ampscript-data": "^2.1.0",
-        "handlebars-data": "^0.1.0",
-        "sfmc-language-lsp": "^2.0.0",
-        "ssjs-data": "^0.13.0"
+        "ampscript-data": "^3.0.0",
+        "handlebars-data": "^0.3.0",
+        "sfmc-language-lsp": "^3.4.0",
+        "ssjs-data": "^0.19.0"
     },
     "engines": {
         "node": ">=22.0.0"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
+        "@modelcontextprotocol/inspector": "^0.22.0",
         "@types/node": "^22.19.17",
         "eslint": "^10.1.0",
         "eslint-config-prettier": "^10.1.8",

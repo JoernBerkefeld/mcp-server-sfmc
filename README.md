@@ -204,7 +204,7 @@ Access via `/mcp.sfmc.writeAmpscript` etc. in VS Code, or via the prompts API:
 
 ## Migrating code to Marketing Cloud Next
 
-Marketing Cloud Next (MCN) supports **41 of the 150 AMPscript functions** and **does not support SSJS**. Three supported functions have behavioral differences (see below). The migration toolkit guides you from analysis through to a fully rewritten result.
+Marketing Cloud Next (MCN) supports **41 of the 155 AMPscript functions** and **does not support SSJS**. Three supported functions have behavioral differences (see below). The migration toolkit guides you from analysis through to a fully rewritten result.
 
 ### Recommended workflow
 
@@ -542,9 +542,13 @@ The `@eslint/mcp` server exposes an `eslint_lint` tool that your AI can call to 
 
 ```
 mcp-server-sfmc
-    └── sfmc-language-lsp   (language intelligence core)
-            ├── ampscript-data  (AMPscript function catalog)
-            └── ssjs-data       (SSJS function catalog)
+    ├── sfmc-language-lsp   (language intelligence core)
+    │       ├── ampscript-data   (AMPscript function catalog)
+    │       ├── ssjs-data        (SSJS function catalog)
+    │       └── handlebars-data  (MCN Handlebars helper catalog)
+    ├── ampscript-data     (direct — conversion maps, mcnSince, handlebarsEquivalent)
+    ├── ssjs-data          (direct — Platform.Function ↔ AMPscript mapping)
+    └── handlebars-data    (direct — AMPscript ↔ Handlebars conversion)
 
 vscode-sfmc-language (VS Code extension)
     └── sfmc-language-lsp   (same core, bundled via esbuild)
