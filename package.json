@@ -74,8 +74,8 @@
         "@modelcontextprotocol/sdk": "^1.29.0",
         "ampscript-data": "^3.0.0",
         "handlebars-data": "^0.3.0",
-        "sfmc-language-lsp": "^3.8.0",
-        "ssjs-data": "^1.1.0"
+        "sfmc-language-lsp": "^3.8.1",
+        "ssjs-data": "^1.1.1"
     },
     "engines": {
         "node": ">=22.0.0"
