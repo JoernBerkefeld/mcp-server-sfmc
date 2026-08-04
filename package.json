@@ -71,7 +71,7 @@
         "format:check": "prettier --check ."
     },
     "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.29.0",
+        "@modelcontextprotocol/sdk": "^1.30.0",
         "ampscript-data": "^3.1.1",
         "handlebars-data": "^0.3.1",
         "sfmc-language-lsp": "^3.9.0",
@@ -82,19 +82,19 @@
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
-        "@modelcontextprotocol/inspector": "^0.22.0",
-        "@types/node": "^22.19.17",
-        "eslint": "^10.1.0",
+        "@modelcontextprotocol/inspector": "^2.0.0",
+        "@types/node": "^22.20.1",
+        "eslint": "^10.8.0",
         "eslint-config-prettier": "^10.1.8",
-        "eslint-plugin-jsdoc": "^63.0.10",
-        "eslint-plugin-prettier": "^5.5.0",
-        "eslint-plugin-unicorn": "^70.0.0",
-        "globals": "^17.4.0",
+        "eslint-plugin-jsdoc": "^63.3.3",
+        "eslint-plugin-prettier": "^5.5.6",
+        "eslint-plugin-unicorn": "^73.0.0",
+        "globals": "^17.9.0",
         "husky": "^9.1.7",
-        "lint-staged": "^17.0.5",
-        "prettier": "^3.9.4",
-        "typescript": "^5.9.3",
-        "typescript-eslint": "^8.62.1"
+        "lint-staged": "^17.3.0",
+        "prettier": "^3.9.6",
+        "typescript": "^6.0.3",
+        "typescript-eslint": "^8.66.0"
     },
     "lint-staged": {
         "*.{js,mjs,cjs,ts}": [

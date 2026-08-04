@@ -1309,9 +1309,13 @@ export function ssjsToHandlebars(code: string): ConversionResult {
 // ---------------------------------------------------------------------------
 
 export interface McnRewriteOptions {
-    /** Function to check if an AMPscript function is MCN-supported */
+    /**
+     * Function to check if an AMPscript function is MCN-supported
+     */
     isMcnSupportedFn: (name: string) => boolean;
-    /** Function to get MCN behavioral notes for a function */
+    /**
+     * Function to get MCN behavioral notes for a function
+     */
     getMcnNotesFn: (name: string) => string | null;
 }
 
@@ -1491,7 +1495,7 @@ export function rewriteAmpForMcn(code: string, options: McnRewriteOptions): McnR
     let difficulty: McnRewriteResult['difficulty'];
     if (hasNotMigratable) {
         difficulty = 'not-migratable';
-    } else if (seenUnsupported.size > 0 || hasSsjs) {
+    } else if (hasSsjs || seenUnsupported.size > 0) {
         difficulty = 'significant';
     } else if (hasMcnNotes) {
         difficulty = 'minor';

@@ -216,7 +216,9 @@ async function main(): Promise<void> {
         try {
             await client.close();
         } catch {
-            /* ignore */
+            /*
+            ignore
+            */
         }
     }
 }

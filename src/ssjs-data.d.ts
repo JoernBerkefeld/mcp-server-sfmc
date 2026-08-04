@@ -20,7 +20,9 @@ declare module 'ssjs-data' {
 
     export const PLATFORM_FUNCTIONS: SsjsPlatformFunction[];
 
-    /** A parameter on an ECMAScript builtin entry. */
+    /**
+     * A parameter on an ECMAScript builtin entry.
+     */
     export interface EcmascriptBuiltinParam {
         name: string;
         type?: string;
@@ -77,14 +79,20 @@ declare module 'ssjs-data' {
         category: 'unavailable' | 'broken';
         ambiguousWithString: boolean;
         description: string;
-        /** Full ES3-safe polyfill source code that defines/overrides the member. */
+        /**
+         * Full ES3-safe polyfill source code that defines/overrides the member.
+         */
         polyfill: string;
     }
 
     export const POLYFILLABLE_METHODS: PolyfillableMethod[];
 
-    /** Polyfillable instance methods keyed by bare method name. */
+    /**
+     * Polyfillable instance methods keyed by bare method name.
+     */
     export const polyfillByPrototypeName: Map<string, PolyfillableMethod>;
-    /** Polyfillable static methods keyed by bare method name. */
+    /**
+     * Polyfillable static methods keyed by bare method name.
+     */
     export const polyfillByStaticName: Map<string, PolyfillableMethod>;
 }

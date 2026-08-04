@@ -33,7 +33,9 @@ const MAX_BODY = 12000;
  *   | 'salesforce_personalization'} ProductScope
  */
 
-/** Maps top-level folder names to product scope tokens. */
+/**
+ * Maps top-level folder names to product scope tokens.
+ */
 const FOLDER_TO_SCOPE = {
     'marketing-cloud-engagement': 'marketing_cloud_engagement',
     'marketing-cloud-next': 'marketing_cloud_next',
@@ -62,7 +64,9 @@ function inferProductScope(relPath) {
     return 'marketing_cloud_engagement';
 }
 
-/** @type {Record<ProductScope, string>} */
+/**
+ * @type {Record<ProductScope, string>}
+ */
 const PRODUCT_LABELS = {
     marketing_cloud_engagement:
         'Marketing Cloud Engagement (MCE; Email Studio, Journey Builder, Automation Studio, Content Builder, Mobile Studio)',
@@ -110,7 +114,9 @@ function chunkMarkdownFile(fullPath, relPath) {
     const productLabel = humanProductLabel(productScope);
     const fileBase = path.basename(relPath);
 
-    /** @type {Array<{ id: string; file: string; relativePath: string; heading: string; body: string; productScope: ProductScope; productLabel: string }>} */
+    /**
+     * @type {Array<{ id: string; file: string; relativePath: string; heading: string; body: string; productScope: ProductScope; productLabel: string }>}
+     */
     const chunks = [];
     const parts = text.split(/\n(?=#{2,3}\s+)/);
     let index = 0;
@@ -146,7 +152,9 @@ function chunkMarkdownFile(fullPath, relPath) {
  * @returns {string[]}
  */
 function listMarkdownFiles(dir, relBase = '') {
-    /** @type {string[]} */
+    /**
+     * @type {string[]}
+     */
     const out = [];
     if (!fs.existsSync(dir)) return out;
     const names = fs.readdirSync(dir, { withFileTypes: true });
@@ -185,7 +193,9 @@ function main() {
         process.exit(1);
     }
 
-    /** @type {Array<{ id: string; file: string; relativePath: string; heading: string; body: string; productScope: ProductScope; productLabel: string }>} */
+    /**
+     * @type {Array<{ id: string; file: string; relativePath: string; heading: string; body: string; productScope: ProductScope; productLabel: string }>}
+     */
     const all = [];
     const sortedFiles = [...files].sort((a, b) => a.localeCompare(b));
     for (const full of sortedFiles) {
@@ -202,7 +212,9 @@ function main() {
             sourceDirRecorded = rel.replaceAll('\\', '/');
         }
     } catch {
-        /* keep absolute */
+        /*
+        keep absolute
+        */
     }
     const payload = {
         generatedAt: new Date().toISOString(),

@@ -55,7 +55,9 @@ export function getChunks(): MceHelpChunk[] {
     return cacheRef.chunks;
 }
 
-/** Reset cache (tests). */
+/**
+ * Reset cache (tests).
+ */
 export function clearMceHelpCache(): void {
     cacheRef.chunks = null;
 }

@@ -85,7 +85,9 @@ function chunkMarkdownFile(fullPath, relPath) {
  * @returns {string[]}
  */
 function listMarkdownFiles(dir) {
-    /** @type {string[]} */
+    /**
+     * @type {string[]}
+     */
     const out = [];
     if (!fs.existsSync(dir)) return out;
     const names = fs.readdirSync(dir, { withFileTypes: true });
@@ -139,7 +141,9 @@ function main() {
             sourceDirRecorded = rel.replaceAll('\\', '/');
         }
     } catch {
-        /* keep absolute */
+        /*
+        keep absolute
+        */
     }
     const payload = {
         generatedAt: new Date().toISOString(),

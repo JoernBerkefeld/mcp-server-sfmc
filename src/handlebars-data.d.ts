@@ -11,7 +11,9 @@
  * @param name
  */
 declare module 'handlebars-data' {
-    /** A parameter on a Handlebars helper definition. */
+    /**
+     * A parameter on a Handlebars helper definition.
+     */
     export interface HandlebarsDataParam {
         name: string;
         type: string;
@@ -20,7 +22,9 @@ declare module 'handlebars-data' {
         variadic?: boolean;
     }
 
-    /** A single MCN Handlebars helper definition. */
+    /**
+     * A single MCN Handlebars helper definition.
+     */
     export interface HandlebarsDataHelper {
         name: string;
         displayName?: string;
@@ -35,7 +39,9 @@ declare module 'handlebars-data' {
         subexpressionOnly?: boolean;
     }
 
-    /** A built-in MCN merge-field binding (`{!$…}`). */
+    /**
+     * A built-in MCN merge-field binding (`{!$…}`).
+     */
     export interface HandlebarsDataBinding {
         name: string;
         token: string;
@@ -44,7 +50,9 @@ declare module 'handlebars-data' {
         description: string;
     }
 
-    /** A Handlebars construct unsupported by the locked-down MCN engine. */
+    /**
+     * A Handlebars construct unsupported by the locked-down MCN engine.
+     */
     export interface HandlebarsDataUnsupportedConstruct {
         id: string;
         astNodeType: string;

@@ -3,7 +3,9 @@
  * Only the fields consumed by mcp-server-sfmc are declared here.
  */
 declare module 'ampscript-data' {
-    /** A parameter on an AMPscript function entry. */
+    /**
+     * A parameter on an AMPscript function entry.
+     */
     export interface AmpscriptFunctionParam {
         name: string;
         description: string;
