@@ -37,8 +37,7 @@ import {
     isSsjsBlockConvertible,
     AMP_TO_HANDLEBARS,
     HANDLEBARS_TO_AMP,
-    AMP_MCN_HANDLEBARS_GAP,
-    HBS_GAP_NOTE,
+    AMP_HANDLEBARS_APPROX,
     ampscriptToHandlebars,
     handlebarsToAmpscript,
     ssjsToHandlebars,
@@ -1339,14 +1338,17 @@ describe('MCP Registry manifest', () => {
 // ---------------------------------------------------------------------------
 
 describe('Handlebars conversion maps (data-driven)', () => {
-    test('AMP_TO_HANDLEBARS only contains AMP functions with a non-null handlebarsEquivalent', () => {
+    test('AMP_TO_HANDLEBARS only contains exact handlebarsEquivalent mappings', () => {
         const expectedKeys = AMPSCRIPT_FUNCTIONS.filter(
-            (f) => typeof f.handlebarsEquivalent === 'string' && f.handlebarsEquivalent.length > 0
+            (f) =>
+                typeof f.handlebarsEquivalent === 'string' &&
+                f.handlebarsEquivalent.length > 0 &&
+                f.handlebarsExact !== false
         ).map((f) => f.name.toLowerCase());
         assert.deepEqual(
             Object.keys(AMP_TO_HANDLEBARS).sort((a, b) => a.localeCompare(b)),
             expectedKeys.sort((a, b) => a.localeCompare(b)),
-            'AMP_TO_HANDLEBARS keys must match ampscript-data handlebarsEquivalent entries'
+            'AMP_TO_HANDLEBARS keys must match exact ampscript-data handlebarsEquivalent entries'
         );
         assert.ok(Object.keys(AMP_TO_HANDLEBARS).length > 0, 'expected at least one mapped helper');
     });
@@ -1372,37 +1374,50 @@ describe('Handlebars conversion maps (data-driven)', () => {
         }
     });
 
-    test('AMP_MCN_HANDLEBARS_GAP matches ampscript-data mcnHandlebarsGap entries', () => {
-        const expected = AMPSCRIPT_FUNCTIONS.filter((f) => f.mcnHandlebarsGap === true).map((f) =>
-            f.name.toLowerCase()
-        );
+    test('AMP_HANDLEBARS_APPROX matches ampscript-data approximate mappings', () => {
+        const expectedKeys = AMPSCRIPT_FUNCTIONS.filter(
+            (f) =>
+                typeof f.handlebarsEquivalent === 'string' &&
+                f.handlebarsEquivalent.length > 0 &&
+                f.handlebarsExact === false
+        ).map((f) => f.name.toLowerCase());
         assert.deepEqual(
-            [...AMP_MCN_HANDLEBARS_GAP].sort((a, b) => a.localeCompare(b)),
-            expected.sort((a, b) => a.localeCompare(b))
+            Object.keys(AMP_HANDLEBARS_APPROX).sort((a, b) => a.localeCompare(b)),
+            expectedKeys.sort((a, b) => a.localeCompare(b)),
+            'AMP_HANDLEBARS_APPROX keys must match approximate ampscript-data handlebarsEquivalent entries'
         );
         assert.ok(
-            AMP_MCN_HANDLEBARS_GAP.has('contentblockbykey'),
-            'ContentBlockByKey is a known gap'
+            AMP_HANDLEBARS_APPROX.contentblockbykey === 'getContentBlock',
+            'ContentBlockByKey maps approximately to getContentBlock'
         );
     });
 
-    test('Category C invariant: gap functions have no handlebarsEquivalent mapping', () => {
-        for (const gapKey of AMP_MCN_HANDLEBARS_GAP) {
+    test('exact and approximate maps are disjoint', () => {
+        for (const key of Object.keys(AMP_HANDLEBARS_APPROX)) {
             assert.equal(
-                AMP_TO_HANDLEBARS[gapKey],
+                AMP_TO_HANDLEBARS[key],
                 undefined,
-                `gap function '${gapKey}' must not appear in AMP_TO_HANDLEBARS (Category C)`
+                `approximate function '${key}' must not appear in AMP_TO_HANDLEBARS`
+            );
+        }
+    });
+
+    test('every AMP_HANDLEBARS_APPROX value names a real handlebars-data helper', () => {
+        for (const helperName of Object.values(AMP_HANDLEBARS_APPROX)) {
+            assert.ok(
+                getHandlebarsHelper(helperName),
+                `approximate helper '${helperName}' must exist in handlebars-data`
             );
         }
     });
 });
 
 // ---------------------------------------------------------------------------
-// convertAmpscriptToHandlebars tool logic (3-category model)
+// convertAmpscriptToHandlebars tool logic (exact / approximate / none)
 // ---------------------------------------------------------------------------
 
 describe('convertAmpscriptToHandlebars tool logic', () => {
-    test('Category A: mapped function → {{helper …}}', () => {
+    test('Exact: mapped function → {{helper …}}', () => {
         // Concat maps to the 'concat' helper (handlebarsEquivalent: 'concat')
         const result = ampscriptToHandlebars('%%=Concat("Hello, ", @name)=%%');
         assert.ok(
@@ -1420,28 +1435,49 @@ describe('convertAmpscriptToHandlebars tool logic', () => {
         );
     });
 
-    test('Category C: ContentBlockByKey → distinct MANUAL_REWRITE note (runtime gap)', () => {
+    test('Approximate: ContentBlockByKey → MANUAL_REWRITE hint naming getContentBlock', () => {
         const result = ampscriptToHandlebars('%%=ContentBlockByKey("my-block")=%%');
         assert.ok(
             result.convertedCode.includes('MANUAL_REWRITE_REQUIRED'),
             `expected MANUAL_REWRITE_REQUIRED, got: ${result.convertedCode}`
         );
         assert.ok(
-            result.convertedCode.includes(HBS_GAP_NOTE),
-            `Category C must use the distinct gap note, got: ${result.convertedCode}`
+            result.convertedCode.includes('{{getContentBlock}}'),
+            `approximate hint must name the closest helper, got: ${result.convertedCode}`
+        );
+        assert.ok(
+            !result.convertedCode.includes('{{getContentBlock '),
+            `approximate mapping must not emit a mechanical {{getContentBlock …}} call, got: ${result.convertedCode}`
         );
     });
 
-    test('Category B differs from Category C (no gap note for plain unsupported fn)', () => {
-        // InsertDE has no handlebarsEquivalent and is not a gap → Category B
+    test('Approximate: Lookup emits a hint rather than a mechanical {{queryFirst …}}', () => {
+        const result = ampscriptToHandlebars('%%=Lookup("DE","col","key",@v)=%%');
+        assert.ok(
+            result.convertedCode.includes('MANUAL_REWRITE_REQUIRED'),
+            `expected MANUAL_REWRITE_REQUIRED, got: ${result.convertedCode}`
+        );
+        assert.ok(
+            result.convertedCode.includes('{{queryFirst}}'),
+            `expected the closest helper named, got: ${result.convertedCode}`
+        );
+        assert.ok(
+            !/\{\{queryFirst\s/.test(result.convertedCode),
+            `approximate mapping must not emit {{queryFirst …}}, got: ${result.convertedCode}`
+        );
+        assert.ok(result.flaggedSections.length > 0, 'approximate mapping should flag the section');
+    });
+
+    test('None: a function with no handlebarsEquivalent → generic MANUAL_REWRITE note', () => {
+        // InsertDE has no handlebarsEquivalent and no approximate mapping.
         const result = ampscriptToHandlebars('%%=InsertDE("DE","Col","Val")=%%');
         assert.ok(
             result.convertedCode.includes('MANUAL_REWRITE_REQUIRED'),
             `expected MANUAL_REWRITE_REQUIRED, got: ${result.convertedCode}`
         );
         assert.ok(
-            !result.convertedCode.includes(HBS_GAP_NOTE),
-            'Category B must NOT use the Category C gap note'
+            result.convertedCode.includes('has no Handlebars equivalent'),
+            `expected the generic no-equivalent note, got: ${result.convertedCode}`
         );
     });
 

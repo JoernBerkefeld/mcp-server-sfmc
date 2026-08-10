@@ -51,7 +51,7 @@ Ready-to-copy workflows (GitHub Actions, GitLab CI, Jenkins, Azure Pipelines, Bi
 | **MCN migration**              | `rewrite_for_mcn` (tool + prompt) deterministically rewrites AMPscript and converts convertible SSJS to AMPscript for MCN, then applies AI reasoning to remaining manual-rewrite sections      |
 | **Code conversion**            | `convertSsjsToAmpscript` and `convertAmpscriptToSsjs` (tool + prompt hybrid) — rule-based conversion with AI-enhanced handling of flagged sections                                             |
 | **MCN Handlebars**             | `lookup_handlebars_helper`, `list_handlebars_helpers`, `get_handlebars_completions`, and `write_handlebars` (authoring) backed by the `handlebars-data` catalog                                |
-| **Handlebars conversion**      | `convertAmpscriptToHandlebars`, `convertHandlebarsToAmpscript`, and `convertSsjsToHandlebars` (tool + prompt hybrid) — data-driven from `ampscript-data` `handlebarsEquivalent` / `mcnHandlebarsGap` |
+| **Handlebars conversion**      | `convertAmpscriptToHandlebars`, `convertHandlebarsToAmpscript`, and `convertSsjsToHandlebars` (tool + prompt hybrid) — data-driven from `ampscript-data` `handlebarsEquivalent` / `handlebarsExact` |
 | **Prompts**                    | Guided prompts for writing AMPscript/SSJS/Handlebars (with MCN constraints), reviewing code, converting between languages, and rewriting for MCN                                               |
 | **Resources**                  | Full function catalogs, keyword list, unsupported ES6+ syntax list, MCN Handlebars helper and binding catalogs                                                                                 |
 | **Help search**                | `search_help` (unified, auto-detects MCE vs MCN from project root); `search_mce_help` (MCE help, 7 product scopes); `search_mcn_help` (MCN developer API reference)                            |
@@ -261,7 +261,7 @@ Functions that depend on CloudPages context (`CloudPagesURL`, `RequestParameter`
 
 ## MCN Handlebars
 
-Marketing Cloud Next embeds a **locked-down Handlebars** templating layer (Handlebars.Net) alongside AMPscript. The server exposes the full helper catalog and conversion tooling, all data-driven from [`handlebars-data`](https://www.npmjs.com/package/handlebars-data) and the `handlebarsEquivalent` / `mcnHandlebarsGap` fields in [`ampscript-data`](https://www.npmjs.com/package/ampscript-data) — nothing is hand-maintained.
+Marketing Cloud Next embeds a **locked-down Handlebars** templating layer (Handlebars.Net) alongside AMPscript. The server exposes the full helper catalog and conversion tooling, all data-driven from [`handlebars-data`](https://www.npmjs.com/package/handlebars-data) and the `handlebarsEquivalent` / `handlebarsExact` fields in [`ampscript-data`](https://www.npmjs.com/package/ampscript-data) — nothing is hand-maintained.
 
 ### Authoring & lookup
 
@@ -281,11 +281,11 @@ AMPscript → Handlebars conversion classifies every function from `ampscript-da
 
 | Category | Condition (in `ampscript-data`)                       | Output                                                            |
 | -------- | ----------------------------------------------------- | ----------------------------------------------------------------- |
-| **A**    | `handlebarsEquivalent` is a helper name               | Mapped to the canonical MCN Handlebars helper                     |
-| **B**    | No Handlebars counterpart                             | `{{!-- MANUAL_REWRITE_REQUIRED: … no Handlebars equivalent --}}`  |
-| **C**    | `mcnHandlebarsGap: true` (MCN-supported, no helper yet) | `{{!-- MANUAL_REWRITE_REQUIRED: … (runtime gap) --}}` (distinct note) |
+| **Exact**       | `handlebarsEquivalent` set AND `handlebarsExact !== false` | Mapped to the canonical MCN Handlebars helper                 |
+| **Approximate** | `handlebarsEquivalent` set AND `handlebarsExact === false` | `{{!-- MANUAL_REWRITE_REQUIRED: … (names the closest helper) --}}` |
+| **None**        | No Handlebars counterpart                             | `{{!-- MANUAL_REWRITE_REQUIRED: … no Handlebars equivalent --}}`  |
 
-The Category C note is intentionally distinct from Category B so consumers can tell a *runtime gap* (function works in MCN AMPscript but has no Handlebars helper) apart from a function with no MCN counterpart at all. `convertSsjsToHandlebars` is transitive (SSJS → AMPscript → Handlebars) and conservatively flags imperative SSJS for manual rewrite.
+The Approximate note names the closest helper so consumers can tell a function whose call shape merely differs (e.g. `ContentBlockByKey` → `getContentBlock`) apart from one with no MCN counterpart at all. `convertSsjsToHandlebars` is transitive (SSJS → AMPscript → Handlebars) and conservatively flags imperative SSJS for manual rewrite.
 
 ## Writing effective prompts
 

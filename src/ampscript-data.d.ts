@@ -20,17 +20,17 @@ declare module 'ampscript-data' {
     export interface AmpscriptFunction {
         name: string;
         /**
-         * The canonical MCN Handlebars helper name this function converts to
-         * (Category A), or null when no Handlebars helper exists. Drives the
-         * AMP_TO_HANDLEBARS / HANDLEBARS_TO_AMP maps in conversion-rules.ts.
+         * The canonical MCN Handlebars helper name this function converts to,
+         * or null when no Handlebars helper exists. Drives the AMP_TO_HANDLEBARS
+         * / HANDLEBARS_TO_AMP / AMP_HANDLEBARS_APPROX maps in conversion-rules.ts.
          */
         handlebarsEquivalent?: string | null;
         /**
-         * True when the function is documented as supported in Marketing Cloud
-         * Next but currently fails at runtime and has no Handlebars helper
-         * (Category C). Such entries must have `handlebarsEquivalent: null`.
+         * Only meaningful when `handlebarsEquivalent` is set: true when the
+         * helper is an argument-for-argument drop-in, false when it does the
+         * same job with a different call shape (converter emits a hint).
          */
-        mcnHandlebarsGap?: boolean;
+        handlebarsExact?: boolean;
         minArgs: number;
         maxArgs: number;
         category: string;

@@ -43,8 +43,6 @@ import {
     ampscriptToHandlebars,
     handlebarsToAmpscript,
     ssjsToHandlebars,
-    AMP_MCN_HANDLEBARS_GAP,
-    HBS_GAP_NOTE,
 } from './conversion-rules.js';
 import {
     ECMASCRIPT_BUILTINS,
@@ -2189,15 +2187,7 @@ server.tool(
                 let status: AmpFunctionStatus;
                 let reason: string;
 
-                const isHbsGap = AMP_MCN_HANDLEBARS_GAP.has(site.name.toLowerCase());
-
-                if (isHbsGap) {
-                    // Category C: documented as MCN-supported but no working Handlebars
-                    // helper exists yet — fails at runtime. Always needs-review, even when
-                    // mcnSince is set, because the data flags a runtime gap.
-                    status = 'needs-review';
-                    reason = `${site.name}() is ${HBS_GAP_NOTE}`;
-                } else if (mcnSince !== null && notes === null) {
+                if (mcnSince !== null && notes === null) {
                     status = 'supported';
                     reason = '—';
                 } else if (mcnSince !== null && notes !== null) {
@@ -2722,11 +2712,11 @@ server.tool(
 server.tool(
     'convertAmpscriptToHandlebars',
     'Deterministically convert AMPscript to Marketing Cloud Next (MCN) Handlebars using the ' +
-        'three-category model built from ampscript-data: (A) functions with a Handlebars helper ' +
-        'equivalent become {{helper …}}; (B) functions with no MCN counterpart become a ' +
-        'MANUAL_REWRITE_REQUIRED comment; (C) mcnHandlebarsGap functions (e.g. ContentBlockByKey) ' +
-        'become a DISTINCT MANUAL_REWRITE_REQUIRED comment noting they are documented as ' +
-        'MCN-supported but currently fail at runtime. Procedural AMPscript blocks (SET/VAR/IF/FOR) ' +
+        'exactness model built from ampscript-data: exact functions (a drop-in Handlebars helper ' +
+        'exists) become {{helper …}}; approximate functions (a helper exists but the call shape ' +
+        'differs, e.g. ContentBlockByKey → getContentBlock) become a MANUAL_REWRITE_REQUIRED ' +
+        'comment naming the closest helper; functions with no MCN counterpart become a plain ' +
+        'MANUAL_REWRITE_REQUIRED comment. Procedural AMPscript blocks (SET/VAR/IF/FOR) ' +
         'have no Handlebars equivalent and are flagged. ' +
         'Use the convertAmpscriptToHandlebars PROMPT for AI-enhanced handling of flagged sections.',
     {
@@ -2779,8 +2769,8 @@ server.prompt(
                         '2. Review the `flaggedSections` — these are constructs the tool could not convert automatically.',
                         '3. For each flagged section, apply your expertise, but obey these hard rules:',
                         '   - NEVER invent a Handlebars helper. Only use helpers that exist in the MCN catalog (call `list_handlebars_helpers` / `lookup_handlebars_helper`).',
-                        '   - Category B (no MCN counterpart): leave a clear `{{!-- MANUAL_REWRITE_REQUIRED … --}}` note explaining the manual step.',
-                        '   - Category C (documented-supported but runtime gap, e.g. ContentBlockByKey): keep the DISTINCT runtime-gap note — do not replace it with a fabricated helper.',
+                        '   - No MCN counterpart: leave a clear `{{!-- MANUAL_REWRITE_REQUIRED … --}}` note explaining the manual step.',
+                        '   - Approximate mapping (a helper exists but the call shape differs, e.g. ContentBlockByKey → getContentBlock): keep the note naming the closest helper and rewrite the call by hand — do not blindly substitute it.',
                         '   - AMPscript procedural blocks (SET/VAR/IF/FOR) have no Handlebars equivalent — Handlebars cannot assign variables or run imperative logic. Restructure the data upstream instead.',
                         '4. Validate your final output by calling `validate_handlebars`.',
                         '5. Produce a single final Handlebars-in-HTML code block plus a short bulleted change log.',

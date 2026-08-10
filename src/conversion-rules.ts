@@ -85,14 +85,19 @@ import { getHelper as getHandlebarsHelper } from 'handlebars-data';
  * `handlebarsEquivalent` field — always in sync with the installed
  * ampscript-data version, never hand-edited (`mcp-conversion-rules-sync.mdc`).
  *
- * Only Category A functions (non-null string `handlebarsEquivalent`) are
- * included. The stored value is the bare helper name; the canonical casing is
- * resolved through `handlebars-data` so emitted `{{helper}}` calls match the
- * catalog exactly.
+ * Only EXACT mappings (`handlebarsEquivalent` set AND `handlebarsExact !== false`)
+ * are included — these are argument-for-argument drop-ins safe to substitute
+ * mechanically. Approximate mappings (`handlebarsExact === false`) live in
+ * AMP_HANDLEBARS_APPROX and produce a hint instead of code. The stored value is
+ * the bare helper name; the canonical casing is resolved through `handlebars-data`
+ * so emitted `{{helper}}` calls match the catalog exactly.
  */
 export const AMP_TO_HANDLEBARS: Readonly<Record<string, string>> = Object.fromEntries(
     AMPSCRIPT_FUNCTIONS.filter(
-        (f) => typeof f.handlebarsEquivalent === 'string' && f.handlebarsEquivalent.length > 0
+        (f) =>
+            typeof f.handlebarsEquivalent === 'string' &&
+            f.handlebarsEquivalent.length > 0 &&
+            f.handlebarsExact !== false
     ).map((f) => {
         const canonical = getHandlebarsHelper(f.handlebarsEquivalent as string);
         return [
@@ -104,12 +109,15 @@ export const AMP_TO_HANDLEBARS: Readonly<Record<string, string>> = Object.fromEn
 
 /**
  * Maps a canonical MCN Handlebars helper name (lowercase) to its AMPscript
- * function name. Inverted from AMP_TO_HANDLEBARS at module load time. Used by
+ * function name. Inverted from the EXACT mappings at module load time. Used by
  * convertHandlebarsToAmpscript.
  */
 export const HANDLEBARS_TO_AMP: Readonly<Record<string, string>> = Object.fromEntries(
     AMPSCRIPT_FUNCTIONS.filter(
-        (f) => typeof f.handlebarsEquivalent === 'string' && f.handlebarsEquivalent.length > 0
+        (f) =>
+            typeof f.handlebarsEquivalent === 'string' &&
+            f.handlebarsEquivalent.length > 0 &&
+            f.handlebarsExact !== false
     ).map((f) => {
         const canonical = getHandlebarsHelper(f.handlebarsEquivalent as string);
         return [
@@ -120,13 +128,26 @@ export const HANDLEBARS_TO_AMP: Readonly<Record<string, string>> = Object.fromEn
 );
 
 /**
- * Set of AMPscript function names (lowercase) flagged `mcnHandlebarsGap: true`
- * in ampscript-data (Category C). These are documented as MCN-supported but
- * currently fail at runtime and have no Handlebars helper — converting them
- * must emit a MANUAL_REWRITE marker distinct from Category B (no counterpart).
+ * Maps an AMPscript function name (lowercase) to the canonical MCN Handlebars
+ * helper it APPROXIMATELY converts to (`handlebarsEquivalent` set AND
+ * `handlebarsExact === false`). The helper does the same job but with a
+ * different call shape (dropped, shifted, or renamed arguments, or different
+ * error behaviour), so converting one of these emits a MANUAL_REWRITE hint
+ * naming the closest helper rather than a mechanical substitution.
  */
-export const AMP_MCN_HANDLEBARS_GAP: ReadonlySet<string> = new Set(
-    AMPSCRIPT_FUNCTIONS.filter((f) => f.mcnHandlebarsGap === true).map((f) => f.name.toLowerCase())
+export const AMP_HANDLEBARS_APPROX: Readonly<Record<string, string>> = Object.fromEntries(
+    AMPSCRIPT_FUNCTIONS.filter(
+        (f) =>
+            typeof f.handlebarsEquivalent === 'string' &&
+            f.handlebarsEquivalent.length > 0 &&
+            f.handlebarsExact === false
+    ).map((f) => {
+        const canonical = getHandlebarsHelper(f.handlebarsEquivalent as string);
+        return [
+            f.name.toLowerCase(),
+            canonical ? canonical.name : (f.handlebarsEquivalent as string),
+        ];
+    })
 );
 
 // ---------------------------------------------------------------------------
@@ -935,14 +956,6 @@ export function stripAmpVars(expr: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Distinct MANUAL_REWRITE note for Category C functions (`mcnHandlebarsGap`).
- * Must be visibly different from the Category B note so consumers can tell a
- * documented-but-broken function apart from one with no counterpart at all.
- */
-export const HBS_GAP_NOTE =
-    'documented as supported in Marketing Cloud Next but currently fails at runtime — no Handlebars helper exists yet';
-
-/**
  * Split a function-argument string into top-level comma-separated arguments,
  * respecting nested parens/brackets and quoted strings. Returns an empty array
  * for an empty/whitespace-only string.
@@ -1072,7 +1085,7 @@ function convertInlineAmpToHbs(
         const key = functionName.toLowerCase();
         const hbsArguments = splitArguments(functionMatch[2]).map((a) => ampArgumentToHbs(a));
 
-        // Category A — mapped helper.
+        // Exact — argument-for-argument drop-in helper.
         const helper = AMP_TO_HANDLEBARS[key];
         if (helper) {
             changes.push({
@@ -1082,17 +1095,20 @@ function convertInlineAmpToHbs(
             return `{{${helper}${hbsArguments.length > 0 ? ' ' + hbsArguments.join(' ') : ''}}}`;
         }
 
-        // Category C — mcnHandlebarsGap (distinct note from Category B).
-        if (AMP_MCN_HANDLEBARS_GAP.has(key)) {
+        // Approximate — a helper exists but the call shape differs, so emit a
+        // hint naming the closest helper rather than a mechanical substitution.
+        const approxHelper = AMP_HANDLEBARS_APPROX[key];
+        if (approxHelper) {
+            const reason = `${functionName} has no drop-in Handlebars helper; the closest is {{${approxHelper}}}, but the call shape differs — rewrite by hand`;
             flaggedSections.push({
                 line: lineNum,
                 code: `%%=${inner}=%%`,
-                reason: `${functionName} is ${HBS_GAP_NOTE}`,
+                reason,
             });
-            return `{{!-- MANUAL_REWRITE_REQUIRED: ${functionName} is ${HBS_GAP_NOTE} --}}`;
+            return `{{!-- MANUAL_REWRITE_REQUIRED: ${reason} --}}`;
         }
 
-        // Category B — no Handlebars counterpart.
+        // No counterpart at all.
         flaggedSections.push({
             line: lineNum,
             code: `%%=${inner}=%%`,
@@ -1114,11 +1130,11 @@ function convertInlineAmpToHbs(
  * Convert AMPscript to MCN Handlebars using deterministic, data-driven rules.
  *
  * Inline expressions (`%%=Fn(args)=%%`, `%%=v(@x)=%%`, `%%var%%`) are mapped via
- * the three conversion categories built from ampscript-data's
- * `handlebarsEquivalent` / `mcnHandlebarsGap` fields:
- * - **A** — mapped helper → `{{helper …}}`
- * - **B** — no counterpart → `{{!-- MANUAL_REWRITE_REQUIRED … --}}`
- * - **C** — `mcnHandlebarsGap` → `{{!-- MANUAL_REWRITE_REQUIRED … (distinct note) --}}`
+ * ampscript-data's `handlebarsEquivalent` / `handlebarsExact` fields:
+ * - **Exact** (`handlebarsExact !== false`) — mapped helper → `{{helper …}}`
+ * - **Approximate** (`handlebarsExact === false`) — helper exists but call shape
+ *   differs → `{{!-- MANUAL_REWRITE_REQUIRED … (names the closest helper) --}}`
+ * - **None** — no counterpart → `{{!-- MANUAL_REWRITE_REQUIRED … --}}`
  *
  * Procedural AMPscript blocks (`%%[ … ]%%`, `SET`/`VAR`/`IF`/`FOR`) have no
  * Handlebars counterpart (Handlebars cannot assign variables or run imperative
