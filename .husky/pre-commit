@@ -3,6 +3,12 @@ if [[ $SKIP_HOOKS -gt 0 ]]; then
   exit 0
 fi
 
+echo "[PRE-COMMIT] Checking package-lock.json is registry-only..."
+node scripts/check-lockfile-registry-only.mjs || {
+  echo "[PRE-COMMIT] package-lock.json has link:/file:/workspace: or local resolved paths. Run 'npm install --no-workspaces' to regenerate. See release-tracking.mdc."
+  exit 1
+}
+
 echo "[PRE-COMMIT] Run lint-staged"
 npx lint-staged || {
   echo "[PRE-COMMIT] lint-staged reported errors it could not auto-fix. Fix them manually and try again."
