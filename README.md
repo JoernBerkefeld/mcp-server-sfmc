@@ -4,6 +4,14 @@ MCP server providing Salesforce Marketing Cloud language intelligence — AMPscr
 
 Built on [sfmc-language-lsp](https://github.com/JoernBerkefeld/sfmc-language-lsp), the same engine that powers the [SFMC Language Service VS Code extension](https://marketplace.visualstudio.com/items?itemName=joernberkefeld.sfmc-language).
 
+## Shared-diagnostic migration
+
+`sfmc-language-lsp` **4.0.0** changes shared validator codes to canonical `sfmc/...` IDs and preserves quick-fix variants and original payloads in a namespaced envelope. See the [LSP migration and rule documentation](https://github.com/JoernBerkefeld/sfmc-language-lsp/blob/v4.0.0/README.md#diagnostic-identities-and-documentation). Documentation URLs are owned by the LSP version, not this MCP package.
+
+Consumer regression coverage checks the canonical SSJS diagnostics, distinct polyfill/replacement payloads, and overlap suppression. This is not a new MCP tool or a promise that every tool response exposes raw LSP diagnostics.
+
+Version **2.9.2** adopts `sfmc-language-lsp: ^4.0.0` and `ssjs-data: ^2.1.0` from npm. MCP validation and review output continues to format locations, severities, and messages rather than expose raw LSP codes or envelopes, so this compatibility update remains a patch release. The updated SSJS catalog also includes additional unsupported ECMAScript methods; support evidence is scoped to the documented Marketing Cloud Engagement contexts.
+
 ## VS Code MCP Server Gallery (`@mcp`)
 
 This package is registered with the [official MCP Registry](https://registry.modelcontextprotocol.io) as **`io.github.JoernBerkefeld/mcp-server-sfmc`** so it can appear in Visual Studio Code when you use the **`@mcp`** filter in the Extensions view (see the [publish quickstart](https://github.com/modelcontextprotocol/registry/blob/main/docs/modelcontextprotocol-io/quickstart.mdx)). Enable **`chat.mcp.gallery.enabled`** if the gallery does not show.

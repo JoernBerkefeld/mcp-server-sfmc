@@ -12,6 +12,8 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import {
     sfmcLanguageService,
     validateAmpscript,
@@ -92,6 +94,41 @@ describe('validate_ampscript tool logic', () => {
 // ---------------------------------------------------------------------------
 
 describe('validate_ssjs tool logic', () => {
+    test('declares published diagnostic-contract and SSJS catalog dependencies', () => {
+        const manifest = readRepoJson('package.json');
+        const lock = readRepoJson('package-lock.json');
+        assert.equal(manifest.dependencies['sfmc-language-lsp'], '^4.0.0');
+        assert.equal(manifest.dependencies['ssjs-data'], '^2.1.0');
+        assert.equal(lock.packages['node_modules/sfmc-language-lsp'].version, '4.0.0');
+        assert.equal(lock.packages['node_modules/ssjs-data'].version, '2.1.0');
+    });
+    test('accepts canonical diagnostics without losing validator messages or fix variants', () => {
+        const diags = validateSsjs('Array.isArray(x); JSON.parse(str);', {
+            maxNumberOfProblems: 100,
+        });
+        const unavailable = diags.filter((d) => d.code === 'sfmc/ssjs-no-unavailable-method');
+        assert.equal(unavailable.length, 2);
+        const polyfill = unavailable.find((d) => d.data.sfmc.variant === 'ssjs/polyfill-required');
+        const replacement = unavailable.find(
+            (d) => d.data.sfmc.variant === 'ssjs/replace-with-platform-function'
+        );
+        assert.ok(polyfill);
+        assert.ok(replacement);
+        assert.match(polyfill.message, /Array\.isArray/);
+        assert.match(replacement.message, /JSON\.parse/);
+        assert.equal(typeof polyfill.data.sfmc.payload.polyfill, 'string');
+        assert.equal(replacement.data.sfmc.payload.replacement, 'Platform.Function.ParseJSON');
+        assert.equal(polyfill.codeDescription.href, replacement.codeDescription.href);
+        assert.equal(
+            sfmcLanguageService
+                .validate(
+                    { text: 'Array.isArray(x); JSON.parse(str);', languageId: 'ssjs' },
+                    { maxNumberOfProblems: 100, disableLspDiagnosticsForEslintRules: true }
+                )
+                .filter((d) => d.code === 'sfmc/ssjs-no-unavailable-method').length,
+            0
+        );
+    });
     test('reports no issues for valid SSJS', () => {
         // Use Platform.Function.Now() with correct Core Load version — no diagnostics expected
         const code =
@@ -216,6 +253,57 @@ describe('lookup_ssjs_function tool logic', () => {
         assert.ok(function_, 'Lookup should be found');
         assert.ok(!function_.requiresCoreLoad, 'Lookup should not require Core load');
     });
+});
+
+describe('lookup_ssjs_function integration (MCP subprocess)', () => {
+    for (const { name, qualifiedName } of [
+        { name: 'structuredClone', qualifiedName: 'Global.structuredClone' },
+        { name: 'Object.groupBy', qualifiedName: 'Object.groupBy' },
+        { name: 'String.prototype.matchAll', qualifiedName: 'String.prototype.matchAll' },
+    ]) {
+        test(
+            `${name} preserves unsupported CloudPage evidence over stdio`,
+            { timeout: 30_000 },
+            async () => {
+                const transport = new StdioClientTransport({
+                    command: process.execPath,
+                    args: [join(repoRoot, 'dist', 'index.js')],
+                    cwd: repoRoot,
+                });
+                const client = new Client({ name: 'ssjs-lookup-regression', version: '1.0.0' });
+                try {
+                    await client.connect(transport);
+                    const result = await client.callTool({
+                        name: 'lookup_ssjs_function',
+                        arguments: { name },
+                    });
+                    assert.notEqual(result.isError, true);
+                    assert.equal(result.content.length, 1);
+                    assert.equal(result.content[0].type, 'text');
+                    const text = result.content[0].text;
+                    assert.equal(
+                        text.split('\n', 1)[0],
+                        `## ${qualifiedName} — ❌ unavailable (no polyfill)`
+                    );
+                    assert.match(text, /\*\*Do not use this in SSJS\.\*\*/);
+                    assert.doesNotMatch(
+                        text,
+                        /not found|unverified|✅ supported|polyfill available|```/i
+                    );
+                    assert.match(text, /is undefined and a direct .* throws/);
+                    assert.match(text, /tested Engagement CloudPage contexts/);
+                    assert.match(
+                        text,
+                        /before Core loading, with Core 1\.1\.1, and with Core 1\.1\.5/
+                    );
+                    assert.match(text, /Email and other contexts were not tested\./);
+                    assert.match(text, /No verified polyfill is bundled\./);
+                } finally {
+                    await client.close();
+                }
+            }
+        );
+    }
 });
 
 // ---------------------------------------------------------------------------
