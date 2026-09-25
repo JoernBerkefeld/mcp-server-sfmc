@@ -1,6 +1,6 @@
 {
     "name": "mcp-server-sfmc",
-    "version": "2.9.2",
+    "version": "2.10.0",
     "mcpName": "io.github.JoernBerkefeld/mcp-server-sfmc",
     "description": "SFMC AMPscript/SSJS/GTL tools + searchable MCE and MCN developer docs, with full MCN platform support.",
     "author": "Jörn Berkefeld",
@@ -72,9 +72,9 @@
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.30.0",
-        "ampscript-data": "^4.0.0",
+        "ampscript-data": "^4.2.0",
         "handlebars-data": "^0.4.0",
-        "sfmc-language-lsp": "^4.0.0",
+        "sfmc-language-lsp": "^4.2.0",
         "ssjs-data": "^2.1.0"
     },
     "engines": {

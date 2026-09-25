@@ -10,7 +10,7 @@ Built on [sfmc-language-lsp](https://github.com/JoernBerkefeld/sfmc-language-lsp
 
 Consumer regression coverage checks the canonical SSJS diagnostics, distinct polyfill/replacement payloads, and overlap suppression. This is not a new MCP tool or a promise that every tool response exposes raw LSP diagnostics.
 
-Version **2.9.2** adopts `sfmc-language-lsp: ^4.0.0` and `ssjs-data: ^2.1.0` from npm. MCP validation and review output continues to format locations, severities, and messages rather than expose raw LSP codes or envelopes, so this compatibility update remains a patch release. The updated SSJS catalog also includes additional unsupported ECMAScript methods; support evidence is scoped to the documented Marketing Cloud Engagement contexts.
+Version **2.10.0** adopts `ampscript-data: ^4.2.0` and `sfmc-language-lsp: ^4.2.0` from npm. This Winter ’27 (API 68) catalog update makes the current AMPscript and shared language-service metadata available to MCP clients. MCP validation and review output continues to format locations, severities, and messages rather than expose raw LSP codes or envelopes.
 
 ## VS Code MCP Server Gallery (`@mcp`)
 

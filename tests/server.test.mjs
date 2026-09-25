@@ -97,10 +97,12 @@ describe('validate_ssjs tool logic', () => {
     test('declares published diagnostic-contract and SSJS catalog dependencies', () => {
         const manifest = readRepoJson('package.json');
         const lock = readRepoJson('package-lock.json');
-        assert.equal(manifest.dependencies['sfmc-language-lsp'], '^4.0.0');
+        assert.equal(manifest.dependencies['ampscript-data'], '^4.2.0');
+        assert.equal(manifest.dependencies['sfmc-language-lsp'], '^4.2.0');
         assert.equal(manifest.dependencies['ssjs-data'], '^2.1.0');
-        assert.equal(lock.packages['node_modules/sfmc-language-lsp'].version, '4.0.0');
-        assert.equal(lock.packages['node_modules/ssjs-data'].version, '2.1.0');
+        assert.equal(lock.packages['node_modules/ampscript-data'].version, '4.2.0');
+        assert.equal(lock.packages['node_modules/sfmc-language-lsp'].version, '4.2.0');
+        assert.equal(lock.packages['node_modules/ssjs-data'].version, '2.1.1');
     });
     test('accepts canonical diagnostics without losing validator messages or fix variants', () => {
         const diags = validateSsjs('Array.isArray(x); JSON.parse(str);', {
@@ -291,13 +293,13 @@ describe('lookup_ssjs_function integration (MCP subprocess)', () => {
                         /not found|unverified|✅ supported|polyfill available|```/i
                     );
                     assert.match(text, /is undefined and a direct .* throws/);
-                    assert.match(text, /tested Engagement CloudPage contexts/);
+                    assert.match(text, /Engagement CloudPage contexts: before Core loading/);
                     assert.match(
                         text,
                         /before Core loading, with Core 1\.1\.1, and with Core 1\.1\.5/
                     );
-                    assert.match(text, /Email and other contexts were not tested\./);
-                    assert.match(text, /No verified polyfill is bundled\./);
+                    assert.match(text, /Email and other contexts are not covered\./);
+                    assert.match(text, /No polyfill is bundled\./);
                 } finally {
                     await client.close();
                 }
