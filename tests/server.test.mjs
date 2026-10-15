@@ -98,10 +98,10 @@ describe('validate_ssjs tool logic', () => {
         const manifest = readRepoJson('package.json');
         const lock = readRepoJson('package-lock.json');
         assert.equal(manifest.dependencies['ampscript-data'], '^4.2.0');
-        assert.equal(manifest.dependencies['sfmc-language-lsp'], '^4.2.0');
+        assert.equal(manifest.dependencies['sfmc-language-lsp'], '^4.3.1');
         assert.equal(manifest.dependencies['ssjs-data'], '^2.1.0');
         assert.equal(lock.packages['node_modules/ampscript-data'].version, '4.2.0');
-        assert.equal(lock.packages['node_modules/sfmc-language-lsp'].version, '4.2.0');
+        assert.equal(lock.packages['node_modules/sfmc-language-lsp'].version, '4.3.1');
         assert.equal(lock.packages['node_modules/ssjs-data'].version, '2.1.1');
     });
     test('accepts canonical diagnostics without losing validator messages or fix variants', () => {
@@ -177,6 +177,86 @@ describe('validate_sfmc_html tool logic (GTL)', () => {
         validateGtlBlocks(code, diags, 100);
         assert.equal(diags.length, 0);
     });
+});
+
+describe('validate_sfmc_html integration (MCP subprocess)', () => {
+    const browserScripts = [
+        '<script>const browserOnly = async () => document.querySelector("main");</script>',
+        '<script type="module">export const browserModule = window.location;</script>',
+        '<script type="application/json">{"value": "let const =>"}</script>',
+        '<script type="importmap">{"imports": {"app": "/app.js"}}</script>',
+    ].join('\n');
+    const serverPrefix = '<p>\u{1F600}</p><script runat="server">';
+    const cases = [
+        {
+            name: 'excludes classic, module and data scripts from SSJS checks',
+            code: browserScripts,
+            expected: /^No issues found\.$/,
+        },
+        {
+            name: 'does not report MCN SSJS incompatibility for browser-only HTML',
+            code: browserScripts,
+            target: 'next',
+            expected: /^No issues found\.$/,
+        },
+        {
+            name: 'keeps original UTF-16 server diagnostic positions after browser scripts',
+            code: `${browserScripts}\n${serverPrefix}let serverOnly = 1;</script>`,
+            expected: new RegExp(`line 5, col ${serverPrefix.length + 1}:.*not supported`),
+            absent: /browserOnly|browserModule|arrow/,
+        },
+        {
+            name: 'browser Core loads and polyfills cannot suppress server warnings',
+            code: [
+                '<script>Platform.Load("Core", "1.1.5"); Array.isArray = function () {};</script>',
+                '<script runat="server">DataExtension.Init("Example"); Array.isArray([]);</script>',
+            ].join('\n'),
+            expected: /line 2, col 24:.*Platform\.Load/,
+            alsoExpected: /Array\.isArray/,
+        },
+        {
+            name: 'preserves cross-server-block forward-reference checks',
+            code: [
+                '<script>function later() {}</script>',
+                '<script runat="server">later();</script>',
+                '<script runat="server">function later() {}</script>',
+            ].join('\n'),
+            expected: /line 2, col 24:.*declared in a later/,
+        },
+        {
+            name: 'still reports MCN incompatibility for real server JavaScript',
+            code: `${browserScripts}\n<script runat="server">var serverOnly = 1;</script>`,
+            target: 'next',
+            expected: /Marketing Cloud Next/,
+        },
+    ];
+
+    for (const { name, code, target, expected, alsoExpected, absent } of cases) {
+        test(name, { timeout: 30_000 }, async () => {
+            const transport = new StdioClientTransport({
+                command: process.execPath,
+                args: [join(repoRoot, 'dist', 'index.js')],
+                cwd: repoRoot,
+            });
+            const client = new Client({ name: 'mixed-html-regression', version: '1.0.0' });
+            try {
+                await client.connect(transport);
+                const result = await client.callTool({
+                    name: 'validate_sfmc_html',
+                    arguments: { code, ...(target && { target }) },
+                });
+                assert.notEqual(result.isError, true);
+                assert.equal(result.content.length, 1);
+                assert.equal(result.content[0].type, 'text');
+                const text = result.content[0].text;
+                assert.match(text, expected);
+                if (alsoExpected) assert.match(text, alsoExpected);
+                if (absent) assert.doesNotMatch(text, absent);
+            } finally {
+                await client.close();
+            }
+        });
+    }
 });
 
 // ---------------------------------------------------------------------------

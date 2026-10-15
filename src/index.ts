@@ -18,6 +18,7 @@ import {
     sfmcLanguageService,
     validateAmpscript,
     validateSsjs,
+    validateMixedDocumentSsjs,
     validateGtlBlocks,
     isMcnSupported,
     getMcnApiVersion,
@@ -330,7 +331,7 @@ server.tool(
         const limit = maxProblems ?? 100;
         const settings: SfmcSettings = { maxNumberOfProblems: limit, targetPlatform: target };
         const ampDiags = validateAmpscript(code, settings);
-        const ssjsDiags = validateSsjs(code, settings);
+        const ssjsDiags = validateMixedDocumentSsjs(code, settings);
         const gtlDiags: ReturnType<typeof validateAmpscript> = [];
         validateGtlBlocks(code, gtlDiags, limit);
         const all = [...ampDiags, ...ssjsDiags, ...gtlDiags].sort(
