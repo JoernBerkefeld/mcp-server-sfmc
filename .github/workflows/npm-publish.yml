@@ -58,6 +58,26 @@ jobs:
                     npm publish
                   fi
 
+            # npm accepts a publish before the version becomes publicly visible (it can take several
+            # minutes). The MCP Registry validates the version against npm and rejects it with a 404
+            # until then, so wait here before registering. Runs before the OIDC login so the
+            # registry token is fresh when it is used.
+            - name: Wait until the version is available on npm
+              run: |
+                  set -euo pipefail
+                  pkg_name="$(node -p "require('./package.json').name")"
+                  pkg_version="$(node -p "require('./package.json').version")"
+                  deadline=$(( $(date +%s) + 900 ))
+                  until npm view "${pkg_name}@${pkg_version}" version --registry=https://registry.npmjs.org/ --prefer-online >/dev/null 2>&1; do
+                    if [ "$(date +%s)" -ge "${deadline}" ]; then
+                      echo "::error::${pkg_name}@${pkg_version} is still not visible on npm after 15 minutes. Re-run this job once it is; the npm publish step will be skipped."
+                      exit 1
+                    fi
+                    echo "${pkg_name}@${pkg_version} is not visible on npm yet; checking again in 30 seconds."
+                    sleep 30
+                  done
+                  echo "${pkg_name}@${pkg_version} is available on npm."
+
             # Uses workflow permissions.id-token (github-oidc). If this fails with an auth error, compare
             # repository/org Actions settings with https://github.com/modelcontextprotocol/registry/blob/main/docs/modelcontextprotocol-io/github-actions.mdx
             - name: Install mcp-publisher
