@@ -30,6 +30,7 @@ export default tseslint.config(
             },
         },
         rules: {
+            'unicorn/no-asterisk-prefix-in-documentation-comments': 'off',
             'no-console': 'warn',
             'unicorn/better-regex': 'off',
             'unicorn/catch-error-name': ['error', { name: 'ex' }],

@@ -98,11 +98,11 @@ describe('validate_ssjs tool logic', () => {
         const manifest = readRepoJson('package.json');
         const lock = readRepoJson('package-lock.json');
         assert.equal(manifest.dependencies['ampscript-data'], '^4.2.0');
-        assert.equal(manifest.dependencies['sfmc-language-lsp'], '^4.3.1');
-        assert.equal(manifest.dependencies['ssjs-data'], '^2.1.0');
+        assert.equal(manifest.dependencies['sfmc-language-lsp'], '^4.4.0');
+        assert.equal(manifest.dependencies['ssjs-data'], '^2.1.2');
         assert.equal(lock.packages['node_modules/ampscript-data'].version, '4.2.0');
-        assert.equal(lock.packages['node_modules/sfmc-language-lsp'].version, '4.3.1');
-        assert.equal(lock.packages['node_modules/ssjs-data'].version, '2.1.1');
+        assert.equal(lock.packages['node_modules/sfmc-language-lsp'].version, '4.4.0');
+        assert.equal(lock.packages['node_modules/ssjs-data'].version, '2.1.2');
     });
     test('accepts canonical diagnostics without losing validator messages or fix variants', () => {
         const diags = validateSsjs('Array.isArray(x); JSON.parse(str);', {
