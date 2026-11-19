@@ -98,10 +98,12 @@ describe('validate_ssjs tool logic', () => {
         const manifest = readRepoJson('package.json');
         const lock = readRepoJson('package-lock.json');
         assert.equal(manifest.dependencies['ampscript-data'], '^4.2.0');
-        assert.equal(manifest.dependencies['sfmc-language-lsp'], '^4.4.0');
+        assert.equal(manifest.dependencies['handlebars-data'], '^0.5.0');
+        assert.equal(manifest.dependencies['sfmc-language-lsp'], '^4.6.0');
         assert.equal(manifest.dependencies['ssjs-data'], '^2.1.2');
         assert.equal(lock.packages['node_modules/ampscript-data'].version, '4.2.0');
-        assert.equal(lock.packages['node_modules/sfmc-language-lsp'].version, '4.4.0');
+        assert.equal(lock.packages['node_modules/handlebars-data'].version, '0.5.0');
+        assert.equal(lock.packages['node_modules/sfmc-language-lsp'].version, '4.6.0');
         assert.equal(lock.packages['node_modules/ssjs-data'].version, '2.1.2');
     });
     test('accepts canonical diagnostics without losing validator messages or fix variants', () => {
@@ -1735,6 +1737,8 @@ describe('convertSsjsToHandlebars tool logic', () => {
 // ---------------------------------------------------------------------------
 
 describe('validate_handlebars tool logic', () => {
+    const nextSettings = { maxNumberOfProblems: 100, targetPlatform: 'next' };
+
     test('clean Handlebars produces no handlebars-source diagnostics', () => {
         const diags = validateAmpscript('Hello {{uppercase firstName}}', {
             maxNumberOfProblems: 100,
@@ -1745,6 +1749,23 @@ describe('validate_handlebars tool logic', () => {
             0,
             `expected no handlebars diagnostics, got: ${JSON.stringify(diags)}`
         );
+    });
+
+    test('helpers added for MCN API 68 (md5, base64Encode) are accepted', () => {
+        const diags = validateAmpscript(
+            '{{md5 email}} {{base64Encode email}}',
+            nextSettings
+        ).filter((d) => d.source === 'handlebars');
+        assert.equal(
+            diags.length,
+            0,
+            `expected no handlebars diagnostics, got: ${JSON.stringify(diags)}`
+        );
+        // Control: the same shape with a name outside the catalog is reported.
+        const unknown = validateAmpscript('{{totallyMadeUpHelper999 email}}', nextSettings).filter(
+            (d) => d.source === 'handlebars'
+        );
+        assert.ok(unknown.length > 0, 'an unknown helper should produce a handlebars diagnostic');
     });
 
     test('partial {{> x}} flagged as unsupported construct', () => {
@@ -1783,6 +1804,22 @@ describe('lookup_handlebars_helper tool logic', () => {
         assert.ok(typeof helper.origin === 'string');
         assert.ok(Array.isArray(helper.params));
     });
+
+    test('finds the md5 helper added for MCN API 68', () => {
+        const helper = sfmcLanguageService.lookupHandlebarsHelper('MD5');
+        assert.ok(helper, 'md5 helper should be found case-insensitively');
+        assert.equal(helper.name, 'md5');
+        assert.equal(helper.category, 'Encryption');
+        assert.equal(helper.mcnSince, 68);
+        assert.equal(helper.params[0].name, 'text');
+    });
+
+    test('finds the base64Encode helper added for MCN API 68', () => {
+        const helper = sfmcLanguageService.lookupHandlebarsHelper('base64Encode');
+        assert.ok(helper, 'base64Encode helper should be found');
+        assert.equal(helper.name, 'base64Encode');
+        assert.equal(helper.mcnSince, 68);
+    });
 });
 
 describe('list_handlebars_helpers tool logic', () => {
@@ -1797,6 +1834,32 @@ describe('list_handlebars_helpers tool logic', () => {
         for (const h of helpers) {
             assert.ok(typeof h.mcnSince === 'number', `${h.name} should have a numeric mcnSince`);
         }
+    });
+
+    test('lists the helpers and categories added for MCN API 68', () => {
+        const helpers = sfmcLanguageService.listHandlebarsHelpers();
+        const names = new Set(helpers.map((h) => h.name));
+        for (const name of ['md5', 'base64Encode']) {
+            assert.ok(names.has(name), `catalog should list ${name}`);
+        }
+        const categories = new Set(helpers.map((h) => h.category));
+        for (const category of ['Data', 'Encryption', 'HTTP']) {
+            assert.ok(categories.has(category), `catalog should have category ${category}`);
+        }
+    });
+
+    test('category filter (as applied by the tool) returns the Encryption helpers', () => {
+        const filtered = sfmcLanguageService
+            .listHandlebarsHelpers()
+            .filter((h) => h.category.toLowerCase().includes('encryption'));
+        assert.ok(
+            filtered.some((h) => h.name === 'md5'),
+            'encryption filter should include md5'
+        );
+        assert.ok(
+            filtered.every((h) => h.category === 'Encryption'),
+            'encryption filter should only return Encryption helpers'
+        );
     });
 });
 

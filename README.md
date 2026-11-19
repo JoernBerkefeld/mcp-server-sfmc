@@ -312,6 +312,8 @@ Marketing Cloud Next embeds a **locked-down Handlebars** templating layer (Handl
 5. validate_handlebars           →  helper names, arity, block balance, unsupported constructs
 ```
 
+The catalog follows `handlebars-data` and includes the helpers added for Marketing Cloud Next API 68, among them the Data, Encryption (e.g. `md5`, `sha256`) and HTTP categories.
+
 `validate_handlebars` rejects constructs the MCN engine does not implement — partials (`{{> name}}`), decorators (`{{#* ...}}`), and built-in helpers absent from the locked-down runtime.
 
 ### Conversion categories

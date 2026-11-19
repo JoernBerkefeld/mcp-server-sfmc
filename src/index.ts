@@ -510,7 +510,7 @@ server.tool(
     {
         name: z
             .string()
-            .describe('The Handlebars helper name, e.g. "uppercase", "if", "formatDate".'),
+            .describe('The Handlebars helper name, e.g. "uppercase", "if", "formatDate", "md5".'),
     },
     ({ name }) => {
         const helper = sfmcLanguageService.lookupHandlebarsHelper(name);
@@ -536,7 +536,7 @@ server.tool(
             .string()
             .optional()
             .describe(
-                'Filter by helper category (case-insensitive substring match), e.g. "string", "date", "comparison".'
+                'Filter by helper category (case-insensitive substring match), e.g. "string", "date", "comparison", "data", "encryption", "http".'
             ),
         origin: z
             .enum(['handlebars-builtin', 'mcn-helper', 'mcn-platform'])
