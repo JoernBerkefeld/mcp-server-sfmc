@@ -33,12 +33,15 @@ export const OWNED_PACKAGES = [
     'mcdev',
     'mso-conditional-parser',
     'prettier-plugin-sfmc',
+    'salesforce-data360-rules',
     'sf-plugin-cms',
+    'sf-plugin-data',
     'sfmc-dataloader',
     'sfmc-handlebars-parser',
     'sfmc-language-lsp',
     'sfmc-sdk',
     'ssjs-data',
+    'waba-devtools',
 ];
 
 /**
