@@ -47,19 +47,63 @@ jobs:
                   registry-url: https://registry.npmjs.org/
             - run: npm ci
 
-            # Publish only when this exact version is not already on npm. This keeps the
-            # workflow (and therefore the GitHub Release) green when a release is (re)published
-            # for a version that was already uploaded, instead of failing on EPUBLISHCONFLICT.
-            - name: Publish to npm (skip if version already exists)
+            - name: Verify release tag matches package version
+              shell: bash
+              run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./package.json').version")"
+            # Publish only when this exact version is not on npm yet, so a GitHub Release for a
+            # version that is already published (e.g. the manual first release) stays green.
+            # Only a JSON E404 counts as "not published"; any other lookup failure fails the step.
+            # A package that does not exist at all is never published from here (manual bootstrap).
+            - name: Publish exact version or skip if already published
+              shell: bash
               run: |
-                  set -euo pipefail
-                  pkg_name="$(node -p "require('./package.json').name")"
-                  pkg_version="$(node -p "require('./package.json').version")"
-                  if npm view "${pkg_name}@${pkg_version}" version >/dev/null 2>&1; then
-                    echo "::notice::${pkg_name}@${pkg_version} is already published on npm — skipping npm publish."
-                  else
-                    npm publish
-                  fi
+                  node <<'NODE'
+                  const assert = require('node:assert/strict');
+                  const { spawnSync } = require('node:child_process');
+                  const pkg = require('./package.json');
+                  assert.equal(pkg.name, 'mcp-server-sfmc');
+                  const registry = '--registry=https://registry.npmjs.org/';
+                  const spec = `${pkg.name}@${pkg.version}`;
+
+                  function npm(args) {
+                      const result = spawnSync('npm', args, { encoding: 'utf8' });
+                      if (result.error) throw result.error;
+                      if (result.signal) throw new Error(`npm terminated by ${result.signal}`);
+                      return result;
+                  }
+
+                  function lookup(specification, field, expected) {
+                      const result = npm(['view', specification, field, '--json', registry, '--prefer-online']);
+                      if (result.status === 0) {
+                          assert.equal(JSON.parse(result.stdout), expected, 'Registry returned a different identity');
+                          return true;
+                      }
+                      for (const output of [result.stdout, result.stderr]) {
+                          let data;
+                          try {
+                              data = JSON.parse(output);
+                          } catch {
+                              continue; // Plain-text diagnostics never prove registry absence.
+                          }
+                          if (data?.error?.code === 'E404') return false;
+                          if (data?.error) break;
+                      }
+                      throw new Error(`Registry lookup failed for ${specification}:\n${result.stdout}\n${result.stderr}`);
+                  }
+
+                  if (lookup(spec, 'version', pkg.version)) {
+                      console.log(`::notice::${spec} is already published; skipping npm publish.`);
+                  } else {
+                      if (!lookup(pkg.name, 'name', pkg.name)) {
+                          throw new Error('The first package publication must be performed manually by the user; hosted bootstrap is prohibited.');
+                      }
+                      const result = npm(['publish', '--json', '--no-workspaces', '--access', 'public', '--provenance', registry]);
+                      process.stdout.write(result.stdout);
+                      process.stderr.write(result.stderr);
+                      assert.equal(result.status, 0, `npm publish failed for ${spec}; do not retry publication automatically.`);
+                      console.log(`::notice::npm accepted ${spec} at ${new Date().toISOString()}`);
+                  }
+                  NODE
 
             # npm accepts a publish before the version becomes publicly visible (it can take several
             # minutes). The MCP Registry validates the version against npm and rejects it with a 404
