@@ -74,9 +74,9 @@
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.30.0",
-        "ampscript-data": "^4.2.0",
-        "handlebars-data": "^0.5.0",
-        "sfmc-language-lsp": "^4.6.0",
+        "ampscript-data": "^4.5.1",
+        "handlebars-data": "^0.8.0",
+        "sfmc-language-lsp": "^4.8.0",
         "ssjs-data": "^2.1.2"
     },
     "engines": {

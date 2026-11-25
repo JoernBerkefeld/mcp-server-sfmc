@@ -97,13 +97,13 @@ describe('validate_ssjs tool logic', () => {
     test('declares published diagnostic-contract and SSJS catalog dependencies', () => {
         const manifest = readRepoJson('package.json');
         const lock = readRepoJson('package-lock.json');
-        assert.equal(manifest.dependencies['ampscript-data'], '^4.2.0');
-        assert.equal(manifest.dependencies['handlebars-data'], '^0.5.0');
-        assert.equal(manifest.dependencies['sfmc-language-lsp'], '^4.6.0');
+        assert.equal(manifest.dependencies['ampscript-data'], '^4.5.1');
+        assert.equal(manifest.dependencies['handlebars-data'], '^0.8.0');
+        assert.equal(manifest.dependencies['sfmc-language-lsp'], '^4.8.0');
         assert.equal(manifest.dependencies['ssjs-data'], '^2.1.2');
-        assert.equal(lock.packages['node_modules/ampscript-data'].version, '4.2.0');
-        assert.equal(lock.packages['node_modules/handlebars-data'].version, '0.5.0');
-        assert.equal(lock.packages['node_modules/sfmc-language-lsp'].version, '4.6.0');
+        assert.equal(lock.packages['node_modules/ampscript-data'].version, '4.5.1');
+        assert.equal(lock.packages['node_modules/handlebars-data'].version, '0.8.0');
+        assert.equal(lock.packages['node_modules/sfmc-language-lsp'].version, '4.8.0');
         assert.equal(lock.packages['node_modules/ssjs-data'].version, '2.1.2');
     });
     test('accepts canonical diagnostics without losing validator messages or fix variants', () => {
@@ -625,11 +625,14 @@ describe('lookup_ampscript_function MCN fields', () => {
         assert.ok(typeof notes === 'string', 'Lookup mcnNotes should be a string');
     });
 
-    test('Add: getMcnApiVersion returns 67 and getMcnNotes returns null', () => {
+    test('Add: getMcnApiVersion returns 67 and getMcnNotes describes the Next edge cases', () => {
         const function_ = sfmcLanguageService.lookupAmpscriptFunction('Add');
         assert.ok(function_, 'Add should be found');
         assert.equal(getMcnApiVersion('Add'), 67, 'Add mcnSince should be 67');
-        assert.equal(getMcnNotes('Add'), null, 'Add mcnNotes should be null');
+        assert.ok(
+            getMcnNotes('Add')?.includes('32 bits'),
+            'Add mcnNotes should describe the 32-bit wrap'
+        );
     });
 
     test('AttachFile: getMcnApiVersion returns null and getMcnNotes returns null', () => {
